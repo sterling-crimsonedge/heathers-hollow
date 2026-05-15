@@ -75,6 +75,14 @@ var dialogue_memory_label: Label
 var dialogue_influence_label: Label
 var send_button: Button
 var gift_button: Button
+# HH-062 (Godot half): per-item gift picker so Heather can send any starter
+# inventory item from the dialogue panel instead of always pushing the default
+# Dusty Rose. The picker is a hidden VBoxContainer that gets rebuilt from the
+# cached `starter_inventory` each time the gift button is pressed; the existing
+# keyboard "gift" shortcut still defaults to `_starter_gift_payload()` so the
+# muscle-memory quick-send affordance from earlier heartbeats is preserved.
+var gift_picker_panel: PanelContainer
+var gift_picker_list: VBoxContainer
 
 func _ready() -> void:
 	_create_lighting()
@@ -356,10 +364,44 @@ func _build_ui() -> void:
 	input_row.add_child(send_button)
 
 	gift_button = Button.new()
-	gift_button.text = "Gift Rose"
-	gift_button.tooltip_text = "Give the nearby villager a Dusty Rose from the starter inventory."
+	gift_button.text = "Gift..."
+	gift_button.tooltip_text = "Choose a gift from the starter inventory."
 	gift_button.pressed.connect(_on_gift_pressed)
 	input_row.add_child(gift_button)
+
+	# Hidden gift picker. Rebuilt from `starter_inventory` each time the gift
+	# button is pressed, so any inventory delta from `/client/bootstrap` is
+	# picked up the next time Heather opens it. Placed inside the dialogue
+	# `stack` (above the input row) so it floats inside the dialogue panel
+	# rather than as a separate window — keeps the focus loop simple.
+	gift_picker_panel = PanelContainer.new()
+	gift_picker_panel.visible = false
+	gift_picker_panel.add_theme_stylebox_override("panel", _gift_picker_panel_style())
+	stack.add_child(gift_picker_panel)
+	stack.move_child(gift_picker_panel, stack.get_child_count() - 2)
+
+	var gift_picker_stack := VBoxContainer.new()
+	gift_picker_stack.add_theme_constant_override("separation", 6)
+	gift_picker_panel.add_child(gift_picker_stack)
+
+	var gift_picker_header := HBoxContainer.new()
+	gift_picker_stack.add_child(gift_picker_header)
+
+	var gift_picker_title := Label.new()
+	gift_picker_title.text = "Choose a gift"
+	gift_picker_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	gift_picker_title.add_theme_color_override("font_color", Color.html("#6E5144"))
+	gift_picker_title.add_theme_font_size_override("font_size", 16)
+	gift_picker_header.add_child(gift_picker_title)
+
+	var gift_picker_cancel := Button.new()
+	gift_picker_cancel.text = "Cancel"
+	gift_picker_cancel.pressed.connect(_close_gift_picker)
+	gift_picker_header.add_child(gift_picker_cancel)
+
+	gift_picker_list = VBoxContainer.new()
+	gift_picker_list.add_theme_constant_override("separation", 4)
+	gift_picker_stack.add_child(gift_picker_list)
 
 func _start_bootstrap_request() -> void:
 	bootstrap_request = HTTPRequest.new()
@@ -737,9 +779,16 @@ func _apply_bootstrap_inventory(inventory: Dictionary) -> void:
 	for item in items:
 		if typeof(item) == TYPE_DICTIONARY and item.get("item_id", "") == STARTER_GIFT_ID:
 			starter_gift = item.duplicate(true)
+			# The gift button is the picker entry point now, so the tooltip
+			# should describe the picker rather than a specific item. The
+			# Dusty Rose stays the default for the keyboard shortcut.
 			if gift_button != null:
-				gift_button.tooltip_text = "Give the nearby villager a %s from the starter inventory." % _starter_gift_name()
+				gift_button.tooltip_text = "Choose a gift from the starter inventory (%d items)." % items.size()
 			return
+	# Even without an explicit Dusty Rose entry, surface the inventory size on
+	# the picker entry point so Heather knows the picker is populated.
+	if gift_button != null and not items.is_empty():
+		gift_button.tooltip_text = "Choose a gift from the starter inventory (%d items)." % items.size()
 
 func _starter_gift_payload() -> Dictionary:
 	return starter_gift.duplicate(true)
@@ -777,7 +826,11 @@ func _on_send_pressed() -> void:
 	_send_dialogue()
 
 func _on_gift_pressed() -> void:
-	_send_starter_gift()
+	# Dialogue-side gift button now opens the per-item picker so Heather can
+	# pick any inventory item. The keyboard "gift" shortcut still falls
+	# through to `_send_starter_gift()` (default Dusty Rose) so muscle memory
+	# from earlier heartbeats is preserved.
+	_open_gift_picker()
 
 func _send_dialogue() -> void:
 	if active_villager == null:
@@ -798,6 +851,11 @@ func _send_dialogue() -> void:
 		dialogue_status.text = "AI server unavailable"
 
 func _send_starter_gift() -> void:
+	# Keyboard "gift" shortcut path: send the default Dusty Rose without
+	# opening the picker so muscle memory still works during the demo.
+	_send_gift_item(_starter_gift_payload())
+
+func _send_gift_item(item: Dictionary) -> void:
 	var villager = active_villager
 	if villager == null and player != null:
 		villager = player.current_nearby_villager
@@ -806,16 +864,110 @@ func _send_starter_gift() -> void:
 
 	if not dialogue_panel.visible:
 		_open_dialogue(villager)
+	_close_gift_picker()
 
-	var gift_name := _starter_gift_name()
+	var gift_payload := _normalize_gift_item(item)
+	var gift_name := _gift_display_name(gift_payload)
 	dialogue_body.text += "Heather gives %s a %s.\n" % [villager.display_name, gift_name]
 	dialogue_status.text = "%s is looking at the %s..." % [villager.display_name, gift_name.to_lower()]
 	_hide_dialogue_influence_status()
 
 	var context := _interaction_context(villager, {"gift_source": "starter_inventory"})
-	var sent := conversation_client.send_gift(villager.villager_id, PLAYER_ID, _starter_gift_payload(), context)
+	var sent := conversation_client.send_gift(villager.villager_id, PLAYER_ID, gift_payload, context)
 	if not sent:
 		dialogue_status.text = "AI server unavailable"
+
+func _normalize_gift_item(item) -> Dictionary:
+	# Defensive copy so a stale picker entry can't mutate the cached
+	# `starter_inventory`. Falls back to the default Dusty Rose payload if
+	# the caller hands us something the server wouldn't accept.
+	if typeof(item) == TYPE_DICTIONARY:
+		var item_id := str(item.get("item_id", "")).strip_edges()
+		if not item_id.is_empty():
+			return item.duplicate(true)
+	return _starter_gift_payload()
+
+func _gift_display_name(item: Dictionary) -> String:
+	var name := str(item.get("display_name", "")).strip_edges()
+	if name.is_empty():
+		name = str(item.get("item_id", "Gift")).strip_edges()
+		if name.is_empty():
+			name = "Gift"
+	return name
+
+func _gift_caption(item: Dictionary) -> String:
+	# Mirrors the web demo's category caption beneath each gift button so
+	# Heather can scan the picker by gift shape rather than reading every
+	# name. Falls back to a soft "gift" label when the server didn't tag
+	# the item with a category.
+	var category := str(item.get("category", "")).strip_edges()
+	if category.is_empty():
+		return "gift"
+	return category
+
+func _gift_tooltip(item: Dictionary) -> String:
+	# Hover hint sourced from the server's `gift_prompt`, giving the player
+	# a one-line sensory cue so the picker reads as personality rather than
+	# a flat list of names.
+	return str(item.get("gift_prompt", "")).strip_edges()
+
+func _gift_picker_items() -> Array:
+	# Use the cached bootstrap inventory when it has at least one entry,
+	# falling back to the default starter gift so the picker is never
+	# empty even when `/client/bootstrap` hasn't replied yet.
+	if typeof(starter_inventory) == TYPE_ARRAY and not starter_inventory.is_empty():
+		return starter_inventory
+	return [_starter_gift_payload()]
+
+func _open_gift_picker() -> void:
+	if gift_picker_panel == null or gift_picker_list == null:
+		return
+
+	# Rebuild the list from the latest cached inventory so any post-startup
+	# bootstrap inventory delta is reflected the next time Heather opens it.
+	for existing_child in gift_picker_list.get_children():
+		existing_child.queue_free()
+
+	for item in _gift_picker_items():
+		if typeof(item) != TYPE_DICTIONARY:
+			continue
+
+		var button := Button.new()
+		var display_name := _gift_display_name(item)
+		var caption := _gift_caption(item)
+		button.text = "%s — %s" % [display_name, caption]
+		var tooltip := _gift_tooltip(item)
+		if not tooltip.is_empty():
+			button.tooltip_text = tooltip
+		# Make a per-item defensive copy so each button binds its own dict.
+		var bound_item := item.duplicate(true)
+		button.pressed.connect(_on_gift_picker_item_pressed.bind(bound_item))
+		gift_picker_list.add_child(button)
+
+	gift_picker_panel.visible = true
+
+func _close_gift_picker() -> void:
+	if gift_picker_panel == null:
+		return
+	gift_picker_panel.visible = false
+
+func _on_gift_picker_item_pressed(item: Dictionary) -> void:
+	_send_gift_item(item)
+
+func _gift_picker_panel_style() -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color.html("#FFF6E6")
+	style.border_color = Color.html("#D99AA5")
+	style.set_border_width_all(1)
+	style.corner_radius_top_left = 6
+	style.corner_radius_top_right = 6
+	style.corner_radius_bottom_left = 6
+	style.corner_radius_bottom_right = 6
+	style.set_content_margin(SIDE_LEFT, 12)
+	style.set_content_margin(SIDE_RIGHT, 12)
+	style.set_content_margin(SIDE_TOP, 8)
+	style.set_content_margin(SIDE_BOTTOM, 8)
+	return style
 
 func _on_server_message(message: Dictionary) -> void:
 	if message.get("type", "") == "villager_reply":
@@ -890,6 +1042,7 @@ func _on_server_error(message: String) -> void:
 
 func _close_dialogue() -> void:
 	dialogue_panel.visible = false
+	_close_gift_picker()
 	active_villager = null
 	_clear_dialogue_context_summary()
 	if player != null:

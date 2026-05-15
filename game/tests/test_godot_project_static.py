@@ -408,6 +408,95 @@ def test_main_create_brook_landmark_wiring() -> None:
     )
 
 
+def test_main_gift_picker_wiring() -> None:
+    """HH-062 (Godot half): dialogue-side per-item gift picker.
+
+    Before this follow-up, the gift button in the dialogue panel always sent
+    the default Dusty Rose by calling `conversation_client.send_gift` with
+    `_starter_gift_payload()`. After HH-062 it must open a popup that lets
+    Heather pick any item from the cached `starter_inventory`, while the
+    keyboard `gift` shortcut still falls through to the Dusty Rose default
+    so muscle memory from earlier heartbeats is preserved.
+
+    Runtime validation in Godot is still blocked without a `godot4` binary,
+    so these static checks are the durable proof that the wiring is in
+    place.
+    """
+    main_script = _read(GAME_ROOT / "scripts/main.gd")
+
+    # Picker UI scaffolding lives on the dialogue panel.
+    assert "var gift_picker_panel: PanelContainer" in main_script, (
+        "HH-062 expects a `gift_picker_panel` PanelContainer for the "
+        "dialogue-side picker."
+    )
+    assert "var gift_picker_list: VBoxContainer" in main_script, (
+        "HH-062 expects a `gift_picker_list` VBoxContainer the picker "
+        "rebuilds each time it is opened."
+    )
+    assert "gift_picker_panel = PanelContainer.new()" in main_script
+    assert "gift_picker_panel.visible = false" in main_script
+    assert "gift_picker_list = VBoxContainer.new()" in main_script
+    assert "func _gift_picker_panel_style() -> StyleBoxFlat" in main_script
+
+    # The gift button entry point opens the picker rather than firing a
+    # gift immediately. Tooltip text drops the Dusty Rose hardcoding so it
+    # reads as the picker entry, and the gift button label is no longer
+    # the single-item "Gift Rose" string.
+    assert "gift_button.text = \"Gift...\"" in main_script
+    assert "Choose a gift from the starter inventory" in main_script
+    assert "gift_button.text = \"Gift Rose\"" not in main_script, (
+        "Gift button should no longer claim to send a Dusty Rose — it "
+        "now opens the picker, which delegates to a per-item send."
+    )
+    assert "_open_gift_picker()" in main_script
+    assert "func _open_gift_picker() -> void" in main_script
+    assert "func _close_gift_picker() -> void" in main_script
+    assert "_close_gift_picker()" in main_script
+    assert "func _on_gift_picker_item_pressed(item: Dictionary) -> void" in main_script
+    assert "button.pressed.connect(_on_gift_picker_item_pressed.bind(bound_item))" in main_script
+
+    # The picker iterates the cached `starter_inventory` and builds one
+    # button per entry, with a category caption and a gift_prompt tooltip
+    # so it parallels the web demo's pattern from the twelfth heartbeat.
+    assert "func _gift_picker_items() -> Array" in main_script
+    assert "starter_inventory" in main_script
+    assert "for item in _gift_picker_items():" in main_script
+    assert "func _gift_caption(item: Dictionary) -> String" in main_script
+    assert "func _gift_tooltip(item: Dictionary) -> String" in main_script
+    assert "func _gift_display_name(item: Dictionary) -> String" in main_script
+    assert "item.get(\"gift_prompt\", \"\")" in main_script
+    assert "item.get(\"category\", \"\")" in main_script
+    assert "item.get(\"display_name\", \"\")" in main_script
+    assert "button.text = \"%s — %s\" % [display_name, caption]" in main_script
+    assert "button.tooltip_text = tooltip" in main_script
+
+    # Sends now go through a per-item helper that the picker buttons share
+    # with the keyboard shortcut. The shortcut still defaults to Dusty Rose
+    # via the existing `_starter_gift_payload()` helper.
+    assert "func _send_gift_item(item: Dictionary) -> void" in main_script
+    assert "func _send_starter_gift() -> void" in main_script
+    assert "_send_gift_item(_starter_gift_payload())" in main_script
+    assert "func _normalize_gift_item(item) -> Dictionary" in main_script
+    assert "conversation_client.send_gift(villager.villager_id, PLAYER_ID, gift_payload, context)" in main_script
+    assert "_interaction_context(villager, {\"gift_source\": \"starter_inventory\"})" in main_script
+
+    # Closing the dialogue must also close the picker so a stale list
+    # doesn't linger when Heather walks away.
+    close_dialogue_body = main_script.split("func _close_dialogue() -> void:", 1)[1]
+    close_dialogue_body = close_dialogue_body.split("\nfunc ", 1)[0]
+    assert "_close_gift_picker()" in close_dialogue_body, (
+        "`_close_dialogue` should also close the gift picker so it can't "
+        "outlive the dialogue panel."
+    )
+
+    # The picker must never expose private personality fields — it only
+    # reads inventory entries, which are public-by-construction.
+    picker_body = main_script.split("func _open_gift_picker() -> void:", 1)[1]
+    picker_body = picker_body.split("\nfunc ", 1)[0]
+    assert "system_prompt" not in picker_body
+    assert "private_goals" not in picker_body
+
+
 def test_main_reply_memory_influence_status_wiring() -> None:
     main_script = _read(GAME_ROOT / "scripts/main.gd")
 
@@ -456,6 +545,7 @@ def main() -> None:
     test_main_dialogue_context_summary_wiring()
     test_main_multi_villager_spawn_from_bootstrap_wiring()
     test_main_create_brook_landmark_wiring()
+    test_main_gift_picker_wiring()
     test_main_reply_memory_influence_status_wiring()
     print("✓ Godot project static checks passed")
 
