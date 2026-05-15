@@ -50,6 +50,14 @@ class Personality:
     # Optional spatial placement hint for clients. Empty falls back to the
     # server-side default ("town_square") so older configs stay valid.
     home_location: str = ""
+    # Optional per-villager "loved" gift rubric (HH-062). When supplied, gifts
+    # whose tag set or category intersects with this list are scored as "loved"
+    # by the gift engine. When empty, conversation.py falls back to a legacy
+    # global loved set (flower/porcelain/tea/handmade/garden vegetables) so
+    # older configs keep their pre-HH-062 behaviour. This list is server-side
+    # only — it is *not* exposed in `public_villager_summary` so clients can't
+    # mine the precise gift rubric from the bootstrap payload.
+    loved_tags: list[str] = field(default_factory=list)
 
     @classmethod
     def from_json_file(cls, path: Path) -> "Personality":
@@ -77,6 +85,11 @@ class Personality:
             backstory_anchors=[str(item) for item in data.get("backstory_anchors", [])],
             default_mood=str(data.get("default_mood", "")),
             home_location=str(data.get("home_location", "")),
+            loved_tags=[
+                str(tag).strip().lower()
+                for tag in data.get("loved_tags", [])
+                if str(tag).strip()
+            ],
         )
 
     def starting_relationship(self, subject_id: str) -> dict[str, int]:

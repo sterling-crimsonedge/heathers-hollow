@@ -17,6 +17,7 @@
   },
   "likes": ["flowers", "tea", "porcelain", "garden vegetables", "handmade gifts"],
   "dislikes": ["waste", "loud surprises", "rudeness", "careless handling of keepsakes"],
+  "loved_tags": ["flower", "porcelain", "tea", "handmade", "garden", "soft_color"],
   "relationships": {
     "heather": {
       "starting_affection": 8,

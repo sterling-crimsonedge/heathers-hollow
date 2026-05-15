@@ -17,6 +17,7 @@
   },
   "likes": ["tea", "herbs", "rain", "handmade cups", "quiet company", "lavender"],
   "dislikes": ["waste", "sudden shouting", "being rushed", "mocking someone's fears"],
+  "loved_tags": ["tea", "herb", "lavender", "chamomile", "handmade", "rain"],
   "relationships": {
     "heather": {
       "starting_affection": 5,

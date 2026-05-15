@@ -54,6 +54,46 @@ STARTER_INVENTORY: tuple[InventoryItem, ...] = (
         gift_prompt="A small smooth pebble from the path near the garden.",
         sort_order=40,
     ),
+    # HH-062 cast-specific gifts. Each one was designed to land as "loved" for
+    # one of the four canonical MVP villagers (see loved_tags in their JSON
+    # configs), so the demo can show four distinct "delighted" reactions
+    # instead of every villager loving the same Dusty Rose.
+    InventoryItem(
+        item_id="lavender_sachet",
+        display_name="Lavender Sachet",
+        category="herb",
+        tags=("herb", "lavender", "handmade", "soft_color"),
+        quantity=1,
+        gift_prompt="A small linen sachet of dried lavender, hand-stitched closed.",
+        sort_order=50,
+    ),
+    InventoryItem(
+        item_id="honey_oat_crust",
+        display_name="Honey Oat Crust",
+        category="baked",
+        tags=("bread", "baked", "warm", "handmade"),
+        quantity=1,
+        gift_prompt="A small heel of warm honey oat bread saved from this morning's bake.",
+        sort_order=60,
+    ),
+    InventoryItem(
+        item_id="marigold_sprig",
+        display_name="Marigold Sprig",
+        category="flower",
+        tags=("flower", "marigold", "orange", "garden"),
+        quantity=1,
+        gift_prompt="A bright orange marigold sprig with one slightly bent petal.",
+        sort_order=70,
+    ),
+    InventoryItem(
+        item_id="sea_glass_shard",
+        display_name="Sea Glass Shard",
+        category="trinket",
+        tags=("shiny", "broken", "keepsake", "smooth", "sea"),
+        quantity=1,
+        gift_prompt="A frosted shard of pale-green sea glass smoothed by saltwater.",
+        sort_order=80,
+    ),
 )
 
 

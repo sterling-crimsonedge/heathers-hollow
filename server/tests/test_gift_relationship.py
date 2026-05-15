@@ -45,6 +45,40 @@ DISLIKED_GIFT = {
     "gift_prompt": "A bouquet of flowers that has seen better days.",
 }
 
+# HH-062 per-villager loved-gift smoke fixtures. Each item is shaped so the
+# *signature* tag for one villager (lavender, bread, marigold, smooth) is
+# present, exercising the per-villager loved_tags scoring path.
+FERN_LOVED_GIFT = {
+    "item_id": "lavender_sachet",
+    "display_name": "Lavender Sachet",
+    "category": "herb",
+    "tags": ["herb", "lavender", "handmade", "soft_color"],
+    "quantity": 1,
+    "gift_prompt": "A small linen sachet of dried lavender, hand-stitched closed.",
+}
+
+HUGO_LOVED_GIFT = {
+    "item_id": "honey_oat_crust",
+    "display_name": "Honey Oat Crust",
+    "category": "baked",
+    "tags": ["bread", "baked", "warm", "handmade"],
+    "quantity": 1,
+    "gift_prompt": "A small heel of warm honey oat bread saved from this morning's bake.",
+}
+
+CLOVER_LOVED_GIFT = {
+    "item_id": "marigold_sprig",
+    "display_name": "Marigold Sprig",
+    "category": "flower",
+    "tags": ["flower", "marigold", "orange", "garden"],
+    "quantity": 1,
+    "gift_prompt": "A bright orange marigold sprig with one slightly bent petal.",
+}
+
+# A gift Hugo would *not* love: Dusty Rose has no bread/tea/rain/sea/wood/
+# well-made/warm signature, so it should score neutral against the gruff baker.
+HUGO_NEUTRAL_GIFT = LOVED_GIFT
+
 
 async def run_gift_relationship_check() -> None:
     with TemporaryDirectory() as tmp_dir:
@@ -206,6 +240,80 @@ async def run_gift_relationship_check() -> None:
                 and event.metadata.get("preference") == "loved"
                 for event in persisted_events
             )
+
+            # HH-062 per-villager loved-gift coverage. Each canonical MVP
+            # villager should score "loved" on the cast-specific item whose
+            # tags hit their personal `loved_tags` rubric, *and* Hugo should
+            # still score Dusty Rose as neutral (it has none of his signature
+            # bread/tea/rain/sea/wood/well-made/warm tags). That distinction is
+            # the whole point of the change: gifts now read as personality,
+            # not as a single global rubric.
+            fern_loved = await engine.handle_gift(
+                player_id="heather_fern_loved",
+                villager_id="fern",
+                item=FERN_LOVED_GIFT,
+                context={"location": "garden", "test": "fern_loved"},
+            )
+            hugo_loved = await engine.handle_gift(
+                player_id="heather_hugo_loved",
+                villager_id="hugo",
+                item=HUGO_LOVED_GIFT,
+                context={"location": "shop", "test": "hugo_loved"},
+            )
+            clover_loved = await engine.handle_gift(
+                player_id="heather_clover_loved",
+                villager_id="clover",
+                item=CLOVER_LOVED_GIFT,
+                context={"location": "brook", "test": "clover_loved"},
+            )
+            hugo_neutral = await engine.handle_gift(
+                player_id="heather_hugo_neutral",
+                villager_id="hugo",
+                item=HUGO_NEUTRAL_GIFT,
+                context={"location": "shop", "test": "hugo_neutral"},
+            )
+
+            assert fern_loved["mood"] == "delighted", (
+                f"Fern should love a lavender sachet, got mood={fern_loved['mood']!r}."
+            )
+            assert hugo_loved["mood"] == "delighted", (
+                f"Hugo should love a honey oat crust, got mood={hugo_loved['mood']!r}."
+            )
+            assert clover_loved["mood"] == "delighted", (
+                f"Clover should love a marigold sprig, got mood={clover_loved['mood']!r}."
+            )
+            # Hugo doesn't share Margot's flower rubric — a Dusty Rose should
+            # *not* be loved by the gruff baker. It also shouldn't be disliked
+            # (none of his dislikes match), so the engine should land on
+            # neutral with the conservative "shy" mood label.
+            assert hugo_neutral["mood"] == "shy", (
+                f"Hugo should be neutral on Dusty Rose (no bread/tea/rain/sea match), "
+                f"got mood={hugo_neutral['mood']!r}."
+            )
+
+            for loved_payload in (fern_loved, hugo_loved, clover_loved):
+                memory_id = loved_payload["memory_id"]
+                villager_id = loved_payload["villager_id"]
+                memory = next(
+                    memory for memory in memory_store.get_recent_memories(villager_id, limit=10)
+                    if memory.id == memory_id
+                )
+                assert memory.kind == "gift"
+                assert memory.metadata["preference"] == "loved", (
+                    f"{villager_id} loved-gift memory should record preference=loved, "
+                    f"got {memory.metadata.get('preference')!r}."
+                )
+                # Loved gifts should land at least +5 affection on a 0-baseline
+                # player so the demo's reward signal stays legible. Trust
+                # bumps too, but the magnitude is engine-tunable.
+                assert loved_payload["relationship"]["affection"] >= 5, (
+                    f"{villager_id} loved-gift affection delta should be >= 5, "
+                    f"got {loved_payload['relationship']['affection']}."
+                )
+                assert loved_payload["relationship"]["trust"] >= 2, (
+                    f"{villager_id} loved-gift trust delta should be >= 2, "
+                    f"got {loved_payload['relationship']['trust']}."
+                )
         finally:
             memory_store.close()
 

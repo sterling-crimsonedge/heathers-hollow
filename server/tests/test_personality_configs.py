@@ -88,6 +88,19 @@ def run_personality_config_check() -> None:
                 f"{villager_id} default_mood {personality.default_mood!r} must be a known mood."
             )
 
+        # HH-062 optional per-villager loved-gift rubric. Entries must be
+        # non-empty lowercase strings so the gift-preference set intersection
+        # works without surprise casing bugs. Empty is allowed for backward
+        # compatibility — the engine falls back to DEFAULT_LOVED_TAGS.
+        assert isinstance(personality.loved_tags, list)
+        for entry in personality.loved_tags:
+            assert isinstance(entry, str) and entry.strip(), (
+                f"{villager_id} loved_tags entries must be non-empty strings."
+            )
+            assert entry == entry.lower(), (
+                f"{villager_id} loved_tags entry {entry!r} must be lowercase."
+            )
+
         prompt = personality.prompt_block()
         if personality.quirks:
             assert "Character quirks:" in prompt, (
@@ -132,6 +145,27 @@ def run_personality_config_check() -> None:
         actual = store.load(villager_id).home_location
         assert actual == expected, (
             f"{villager_id} home_location is {actual!r}; expected {expected!r}."
+        )
+
+    # HH-062: the canonical MVP cast each ships an explicit loved_tags rubric
+    # so the gift engine can score "loved" per villager rather than against a
+    # single global set. Each rubric should include at least one tag that
+    # *only* fits its villager so the demo shows four distinct reactions
+    # (see server/world/inventory.py for the matching items).
+    expected_loved_tag_signatures = {
+        "margot": {"porcelain", "flower"},      # Dusty Rose / porcelain button territory
+        "fern": {"lavender", "herb"},            # lavender sachet, chamomile bundle
+        "hugo": {"bread", "sea"},                 # honey oat crust, sea glass
+        "clover": {"marigold", "shiny"},          # marigold sprig, sea glass shard
+    }
+    for villager_id, required in expected_loved_tag_signatures.items():
+        if villager_id not in store.list_ids():
+            continue
+        loved_tags = set(store.load(villager_id).loved_tags)
+        missing = required - loved_tags
+        assert not missing, (
+            f"{villager_id} loved_tags missing required signature tags {sorted(missing)}; "
+            f"current loved_tags = {sorted(loved_tags)}."
         )
 
 

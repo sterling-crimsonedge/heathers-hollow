@@ -22,6 +22,15 @@ from server.world.state import WorldState
 
 POSITIVE_WORDS = {"thanks", "thank", "kind", "love", "beautiful", "sweet", "friend", "happy", "nice"}
 NEGATIVE_WORDS = {"hate", "annoying", "stupid", "ugly", "mean", "bad", "awful"}
+
+# HH-062 legacy global "loved" rubric. When a villager's personality JSON does
+# not supply `loved_tags`, this set is used as a fallback so pre-HH-062 configs
+# keep their original gift behaviour. New configs should supply explicit
+# `loved_tags` so each villager has a distinct rubric — see
+# `_loved_tags_for()` and the personality JSONs under server/data/personalities/.
+DEFAULT_LOVED_TAGS: frozenset[str] = frozenset(
+    {"flower", "porcelain", "tea", "handmade", "garden vegetables"}
+)
 SUPPORTED_LLM_PROVIDERS = {"auto", "fallback", "ollama", "anthropic"}
 DEFAULT_LLM_PROVIDER = "auto"
 OLLAMA_DEFAULT_BASE_URL = "http://127.0.0.1:11434"
@@ -866,11 +875,27 @@ Relevant villager relationships:
         dislikes = {item.lower() for item in personality.dislikes}
         if self._matches_preference(dislikes, item_category, item_tags):
             return "disliked"
+        # HH-062: a villager loves a gift when its tag set or category intersects
+        # with the villager's personal "loved" rubric. The rubric is either the
+        # explicit `loved_tags` list from the JSON config (preferred — distinct
+        # per villager) or the legacy DEFAULT_LOVED_TAGS fallback (for any
+        # pre-HH-062 config that hasn't been updated yet).
+        loved_tags = self._loved_tags_for(personality)
+        item_category_clean = (item_category or "").strip().lower()
+        gift_candidates: set[str] = set(item_tags)
+        if item_category_clean:
+            gift_candidates.add(item_category_clean)
+        if loved_tags & gift_candidates:
+            return "loved"
         if self._matches_preference(likes, item_category, item_tags):
-            if {"flower", "porcelain", "tea", "handmade", "garden vegetables"} & item_tags:
-                return "loved"
             return "liked"
         return "neutral"
+
+    def _loved_tags_for(self, personality: Personality) -> set[str]:
+        explicit = {tag.strip().lower() for tag in personality.loved_tags if tag.strip()}
+        if explicit:
+            return explicit
+        return set(DEFAULT_LOVED_TAGS)
 
     def _matches_preference(self, preferences: set[str], item_category: str, item_tags: set[str]) -> bool:
         candidates = {item_category, *item_tags}
