@@ -259,6 +259,19 @@ class ConversationEngine:
             "neutral": 0.45,
         }.get(preference, 0.55)
         self.mood_tracker.nudge(villager_id, self._server_mood_to_tracker_mood(mood), gift_nudge_weight)
+        # HH-006 mood pin: a loved gift should genuinely *land*. The mood-score
+        # nudge above is heavy (2.5), but a single noisy baseline tick on a
+        # short demo day can still wash it out. Pin `excited` for the next two
+        # in-game hours so the villager visibly carries the loved-gift mood
+        # through Heather's immediate follow-up actions. Liked/neutral/disliked
+        # gifts are *not* pinned — the rubric stays "loved gifts feel biggest,
+        # disliked gifts are a small lingering note" per docs/AI_ARCHITECTURE.md.
+        if preference == "loved":
+            self.mood_tracker.pin(
+                villager_id,
+                self._server_mood_to_tracker_mood(mood),
+                world=self.world_state,
+            )
 
         affection_delta = {"loved": 5, "liked": 2, "neutral": 1, "disliked": -1}[preference]
         trust_delta = 2 if preference in {"loved", "liked"} else 0

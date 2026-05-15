@@ -314,6 +314,45 @@ async def run_gift_relationship_check() -> None:
                     f"{villager_id} loved-gift trust delta should be >= 2, "
                     f"got {loved_payload['relationship']['trust']}."
                 )
+
+                # HH-006 mood pin: a loved gift should set `pinned_mood` and
+                # `pinned_until_minute` on the villager's self mood_state so
+                # the delighted/excited reading actually holds for the next
+                # couple of in-game hours instead of being washed out by the
+                # next baseline tick.
+                self_relationship = memory_store.get_relationship(villager_id, "self")
+                pin_mood_state = (self_relationship.get("metadata") or {}).get("mood_state") or {}
+                assert pin_mood_state.get("pinned_mood") == "excited", (
+                    f"{villager_id} loved-gift should pin mood=excited, "
+                    f"got pinned_mood={pin_mood_state.get('pinned_mood')!r}."
+                )
+                pinned_until_minute = pin_mood_state.get("pinned_until_minute")
+                assert isinstance(pinned_until_minute, int) and pinned_until_minute > 0, (
+                    f"{villager_id} loved-gift should set a positive pinned_until_minute, "
+                    f"got {pinned_until_minute!r}."
+                )
+                # The publicly reported current mood should reflect the pin so
+                # a follow-up `/villagers/{id}` or `/client/villagers/.../context`
+                # call surfaces the loved-gift reading.
+                assert pin_mood_state.get("current") == "excited", (
+                    f"{villager_id} loved-gift should surface current=excited "
+                    f"on the self mood_state, got {pin_mood_state.get('current')!r}."
+                )
+
+            # Neutral and disliked gifts should *not* pin the mood — the cozy
+            # rubric is "loved gifts feel biggest, missteps are a small note",
+            # not "every gift pins for two in-game hours".
+            neutral_self = memory_store.get_relationship("margot", "self")
+            neutral_pin = (neutral_self.get("metadata") or {}).get("mood_state") or {}
+            # After the Margot test sequence above, the most recent gift on
+            # margot is the disliked Wilted Bouquet. The pin set by the prior
+            # Dusty Rose may or may not still be live; what matters is that
+            # the disliked path didn't introduce a *new* delighted/melancholy
+            # pin of its own.
+            assert neutral_pin.get("pinned_mood") in {None, "", "excited"}, (
+                "Disliked gift path must not pin a melancholy mood — the hollow "
+                "should not stew over a misstep."
+            )
         finally:
             memory_store.close()
 
