@@ -1,13 +1,14 @@
 # Heather's Hollow AI server.
 #
-# Villager conversations go through the `claude` CLI (Claude Code) rather
-# than the Anthropic API directly — see README "Running the demo". That
-# means we use Sterling's Claude subscription, not metered API calls, and
-# we don't need the `anthropic` SDK at all.
+# Villager conversations go through the Claude Code SDK rather than the
+# Anthropic API directly — see README "Running the demo". That means we
+# use Sterling's Claude subscription, not metered API calls, and we don't
+# need the `anthropic` SDK at all.
 #
-# Make sure the `claude` CLI is installed and on your PATH:
-#   https://claude.com/claude-code
+# Install the Claude Code SDK:
+#   pip install claude-code-sdk
 
+claude-code-sdk>=0.0.20
 fastapi>=0.110.0
 uvicorn[standard]>=0.27.0
 pydantic>=2.5.0

@@ -70,7 +70,7 @@ app.add_middleware(
 async def root():
     return {
         "service": "heathers-hollow",
-        "claude": "live (via claude CLI)" if engine.using_real_claude else "stubbed (claude CLI not on PATH)",
+        "claude": "live (via Claude Agent SDK)" if engine.using_real_claude else "stubbed (claude-code-sdk not installed)",
         "villagers": [v.id for v in list_villagers()],
     }
 

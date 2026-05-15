@@ -1,29 +1,21 @@
-"""Conversation engine — shells out to the `claude` CLI per villager turn.
+"""Conversation engine — uses the Claude Agent SDK for villager turns.
 
-We use the Claude Code CLI in `--print` mode so each villager call goes
+We use the Claude Code SDK (`claude-code-sdk`) so each villager call goes
 through Sterling's Claude subscription rather than the metered Anthropic
-API. The CLI handles auth via OAuth / keychain; no API key needed.
+API. The SDK handles auth via OAuth / keychain; no API key needed.
 
-Each call structure:
+Each call:
+  - Sets a custom `system_prompt` (the villager's persona + context) that
+    REPLACES the default system prompt, so CLAUDE.md / hooks / agents do
+    NOT contaminate the villager's persona.
+  - Sets `allowed_tools=[]` (no tools — the villager just talks, never
+    edits files or runs shell commands).
 
-    claude --print
-        --model sonnet
-        --tools ""
-        --system-prompt <villager-persona-and-context>
-        "<the player's message>"
+If the `claude-code-sdk` package is not installed, we degrade gracefully
+to a null client that returns a friendly in-character placeholder so the
+demo is still playable. See `_NullClient`.
 
-- `--system-prompt` REPLACES the default system prompt, so the project's
-  CLAUDE.md / hooks / agents do NOT contaminate the villager's persona.
-- `--tools ""` disables all tools — the villager just talks, never edits
-  files or runs shell commands.
-- `--bare` is NOT used: bare mode forces API-key auth, which would defeat
-  the point of using Sterling's subscription.
-
-If the `claude` CLI is not installed, we degrade gracefully to a null
-client that returns a friendly in-character placeholder so the demo is
-still playable. See `_NullClient`.
-
-We don't get true token-by-token streaming from `--print` text mode, but
+We don't get true token-by-token streaming from the SDK in this mode, but
 the WS protocol stays the same — we chunk the response post-hoc so the
 chat UI still pours text out word-by-word.
 """
@@ -32,8 +24,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import shutil
-import subprocess
 from dataclasses import dataclass
 from typing import AsyncIterator, Optional
 
@@ -117,7 +107,7 @@ def build_dynamic_context_block(ctx: TurnContext) -> str:
 
 
 def build_transcript_block(history: list[dict], villager_name: str) -> str:
-    """Serialize prior conversation turns so the stateless CLI sees context."""
+    """Serialize prior conversation turns so the stateless call sees context."""
     if not history:
         return ""
     lines = ["Earlier in this conversation today:"]
@@ -158,10 +148,10 @@ def _describe_relationship(affection: int, familiarity: int) -> str:
     return "You don't really care for them. You're polite, but distant."
 
 
-# --- Claude CLI client -------------------------------------------------------
+# --- Claude Agent SDK client -------------------------------------------------
 
 class _NullClient:
-    """Used when the `claude` CLI isn't on PATH — keeps the demo running."""
+    """Used when the `claude-code-sdk` isn't installed — keeps the demo running."""
 
     available = False
 
@@ -169,25 +159,23 @@ class _NullClient:
         return (
             "(There's a soft pause. A small breeze moves through the cherry "
             "blossoms. The villager smiles, but no words come — perhaps the "
-            "Claude CLI isn't installed on this machine yet.)"
+            "Claude Code SDK isn't installed on this machine yet.)"
         )
 
 
-class ClaudeCliClient:
-    """Calls the `claude` CLI via subprocess, async-friendly.
+class ClaudeSDKClient:
+    """Calls Claude via the Agent SDK (`claude-code-sdk`).
 
-    Subprocess is invoked with an arg list (no shell, no injection surface);
-    the only untrusted strings are passed as command-line arguments, never
-    interpolated into a shell command.
+    Uses the SDK's `query()` async iterator with:
+      - `system_prompt` to replace the default system prompt
+      - `allowed_tools=[]` to disable all tools
+      - `max_turns=1` so the model responds once and stops
 
-    Uses --system-prompt (bypasses default + CLAUDE.md auto-discovery) and
-    --tools "" (no tools — the villager just talks).
+    Auth goes through the Claude subscription (OAuth/keychain) — no API
+    key needed.
     """
 
     available = True
-
-    def __init__(self, executable: str):
-        self.executable = executable
 
     async def call(
         self,
@@ -196,55 +184,60 @@ class ClaudeCliClient:
         user_prompt: str,
         model: str = MAIN_MODEL,
     ) -> str:
-        args = [
-            self.executable,
-            "--print",
-            "--model", model,
-            "--tools", "",                   # no tool use
-            "--output-format", "text",
-            "--system-prompt", system_prompt,
-            user_prompt,
-        ]
+        from claude_code_sdk import query, ClaudeCodeOptions, AssistantMessage, TextBlock
 
-        # Run the blocking subprocess off the event loop so FastAPI stays async.
-        def _run() -> tuple[int, str, str]:
-            try:
-                completed = subprocess.run(
-                    args,
-                    capture_output=True,
-                    text=True,
-                    timeout=CLAUDE_TIMEOUT_SECONDS,
-                    check=False,
-                )
-                return completed.returncode, completed.stdout or "", completed.stderr or ""
-            except subprocess.TimeoutExpired:
-                return -1, "", "timeout"
-            except FileNotFoundError as e:
-                return -1, "", str(e)
+        options = ClaudeCodeOptions(
+            system_prompt=system_prompt,
+            model=model,
+            allowed_tools=[],      # no tool use — villager just talks
+            max_turns=1,           # single response, no agentic loop
+        )
 
-        rc, stdout, stderr = await asyncio.to_thread(_run)
-
-        if rc != 0:
-            print(f"[claude-cli] exit {rc}: {(stderr or '').strip()[:300]}")
+        result_parts: list[str] = []
+        try:
+            async for message in asyncio.wait_for(
+                _collect_sdk_messages(query(prompt=user_prompt, options=options), result_parts),
+                timeout=CLAUDE_TIMEOUT_SECONDS,
+            ):
+                pass  # collection happens inside the helper
+        except asyncio.TimeoutError:
+            print(f"[claude-sdk] timeout after {CLAUDE_TIMEOUT_SECONDS}s")
             return ""
-        return (stdout or "").strip()
+        except Exception as e:
+            print(f"[claude-sdk] error: {e}")
+            return ""
+
+        return "".join(result_parts).strip()
+
+
+async def _collect_sdk_messages(aiter, parts: list[str]):
+    """Walk the SDK async iterator, pulling text blocks into `parts`."""
+    from claude_code_sdk import AssistantMessage, TextBlock
+
+    async for message in aiter:
+        if isinstance(message, AssistantMessage):
+            for block in message.content:
+                if isinstance(block, TextBlock):
+                    parts.append(block.text)
+        yield message
 
 
 # --- conversation engine -----------------------------------------------------
 
 class ConversationEngine:
-    """High-level interface: handles state, memory writes, Claude CLI calls."""
+    """High-level interface: handles state, memory writes, Claude SDK calls."""
 
     def __init__(self, store: MemoryStore, world: WorldState):
         self.store = store
         self.world = world
-        executable = shutil.which("claude")
-        if executable:
-            print(f"[conversation] Using Claude CLI at {executable} (subscription auth).")
-            self.client: ClaudeCliClient | _NullClient = ClaudeCliClient(executable)
-        else:
-            print("[conversation] `claude` CLI not found on PATH — using null client (canned responses).")
-            print("[conversation] Install Claude Code from https://claude.com/claude-code to enable real villagers.")
+
+        try:
+            import claude_code_sdk  # noqa: F401
+            print("[conversation] Claude Code SDK available (subscription auth).")
+            self.client: ClaudeSDKClient | _NullClient = ClaudeSDKClient()
+        except ImportError:
+            print("[conversation] `claude-code-sdk` not installed — using null client (canned responses).")
+            print("[conversation] Install with: pip install claude-code-sdk")
             self.client = _NullClient()
 
     @property
@@ -483,7 +476,7 @@ class ConversationEngine:
 
 async def _chunk_for_streaming(text: str) -> AsyncIterator[str]:
     """Yield the response in small chunks with tiny delays so the WS protocol
-    still produces a streaming feel even though `--print` returns the full
+    still produces a streaming feel even though the SDK returns the full
     text in one shot."""
     if not text:
         return
