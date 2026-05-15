@@ -16,10 +16,14 @@ Cottagecore kawaii. Inspired by Animal Crossing, Neko Atsume, Bamboletta dolls, 
 
 ## Tech stack
 
-- **Engine:** Godot 4 with GDScript
-- **AI backend:** Python server using the Claude API for character conversations and personality evolution
-- **Transport:** WebSocket between game client and AI server
-- **Controller:** Switch Pro controller over Bluetooth is a target input device
+- **Engine:** Godot 4 with GDScript (long-term target). A Three.js web demo (`game/web/`) is the current vertical slice — same WebSocket protocol, runs anywhere with a browser.
+- **AI backend:** Python (FastAPI) server. Villager conversations are powered by the **Claude Code CLI** — `server/ai/conversation.py` shells out to `claude --print` per turn, so the game uses Sterling's Claude subscription rather than the metered Anthropic API. There is no `ANTHROPIC_API_KEY` dependency; auth is handled by the CLI.
+- **Transport:** WebSocket between game client and AI server (REST for state queries).
+- **Controller:** Switch Pro controller over Bluetooth (browser Gamepad API; native in Godot).
+
+### Why the CLI, not the SDK
+
+We don't use the `anthropic` Python SDK. Each villager turn calls `claude --print --system-prompt <persona+context> --tools "" "<player message>"`. `--tools ""` strips tool access (villagers just talk), and `--system-prompt` REPLACES the default — which means project context (this CLAUDE.md, hooks, agents) does NOT leak into Maple's head. If you're editing `conversation.py`, preserve those two flags.
 
 ## MVP scope
 
