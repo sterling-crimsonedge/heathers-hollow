@@ -191,35 +191,34 @@ class ClaudeSDKClient:
             model=model,
             allowed_tools=[],      # no tool use — villager just talks
             max_turns=1,           # single response, no agentic loop
+            permission_mode='bypassPermissions',  # skip hooks/plugin init
         )
 
-        result_parts: list[str] = []
+        async def _run() -> str:
+            parts: list[str] = []
+            try:
+                async for message in query(prompt=user_prompt, options=options):
+                    if isinstance(message, AssistantMessage):
+                        for block in message.content:
+                            if isinstance(block, TextBlock):
+                                parts.append(block.text)
+            except Exception as iter_err:
+                # SDK may raise on unknown message types (e.g. rate_limit_event)
+                # after the actual response has already been yielded.
+                if parts:
+                    print(f"[claude-sdk] non-fatal parse error (response captured): {iter_err}")
+                else:
+                    raise
+            return "".join(parts).strip()
+
         try:
-            async for message in asyncio.wait_for(
-                _collect_sdk_messages(query(prompt=user_prompt, options=options), result_parts),
-                timeout=CLAUDE_TIMEOUT_SECONDS,
-            ):
-                pass  # collection happens inside the helper
+            return await asyncio.wait_for(_run(), timeout=CLAUDE_TIMEOUT_SECONDS)
         except asyncio.TimeoutError:
             print(f"[claude-sdk] timeout after {CLAUDE_TIMEOUT_SECONDS}s")
             return ""
         except Exception as e:
             print(f"[claude-sdk] error: {e}")
             return ""
-
-        return "".join(result_parts).strip()
-
-
-async def _collect_sdk_messages(aiter, parts: list[str]):
-    """Walk the SDK async iterator, pulling text blocks into `parts`."""
-    from claude_code_sdk import AssistantMessage, TextBlock
-
-    async for message in aiter:
-        if isinstance(message, AssistantMessage):
-            for block in message.content:
-                if isinstance(block, TextBlock):
-                    parts.append(block.text)
-        yield message
 
 
 # --- conversation engine -----------------------------------------------------
