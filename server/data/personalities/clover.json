@@ -20,7 +20,8 @@
   "loved_tags": ["shiny", "broken", "marigold", "orange", "trinket", "smooth", "keepsake", "stone"],
   "tuning": {
     "trust_per_talk_cap": 0,
-    "loved_gift_mood_lock_hours": 1.5
+    "loved_gift_mood_lock_hours": 1.5,
+    "trust_cap_unlocks_on_day": 5
   },
   "relationships": {
     "heather": {

@@ -114,6 +114,8 @@ def run_personality_config_check() -> None:
             "negative_talk_per_day_cap",
             "loved_gift_mood_lock_hours",
             "first_gift_bonus_tier",
+            "trust_cap_unlocks_on_day",
+            "shared_weather_affection_bonus",
         }
         for key, value in personality.tuning.items():
             assert key in allowed_tuning_keys, (
@@ -123,6 +125,17 @@ def run_personality_config_check() -> None:
             if key == "loved_gift_mood_lock_hours":
                 assert isinstance(value, (int, float)) and not isinstance(value, bool), (
                     f"{villager_id} tuning.{key} must be a number; got "
+                    f"{type(value).__name__}."
+                )
+                assert value > 0, (
+                    f"{villager_id} tuning.{key} must be > 0; got {value!r}."
+                )
+            elif key == "trust_cap_unlocks_on_day":
+                # Must be a positive integer — the unlock cannot fire on day
+                # zero (same in-game day as first meeting) and a negative
+                # value would invert the comparison.
+                assert isinstance(value, int) and not isinstance(value, bool), (
+                    f"{villager_id} tuning.{key} must be an int; got "
                     f"{type(value).__name__}."
                 )
                 assert value > 0, (
@@ -218,10 +231,22 @@ def run_personality_config_check() -> None:
         "hugo": {
             "affection_per_talk_cap": 1,
             "loved_gift_mood_lock_hours": 3,
+            # HH-006 event-hook follow-up: Hugo earns affection when Heather
+            # notices the weather *and* the world matches (rainy day greetings,
+            # evening greetings). The bonus stacks on top of his tight talk cap
+            # so a single "I love this rain" lands +1 even after his daily cap
+            # is full.
+            "shared_weather_affection_bonus": 1,
         },
         "clover": {
             "trust_per_talk_cap": 0,
             "loved_gift_mood_lock_hours": 1.5,
+            # HH-006 event-hook follow-up: Clover is testing whether Heather
+            # keeps her promises. Five in-game days after first meeting their
+            # trust cap unlocks to the global default — at which point the
+            # `trust_per_talk_cap=0` override is dropped automatically by
+            # `_effective_talk_caps()` in conversation.py.
+            "trust_cap_unlocks_on_day": 5,
         },
         "fern": {},
     }

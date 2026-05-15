@@ -181,23 +181,58 @@ class ConversationEngine:
 
         proposed_affection = self._affection_delta(text)
         proposed_trust = 1 if self._looks_personal(text) else 0
+        world_day_int = int(world.get("day", 1) or 1)
         capped_affection, capped_trust, talk_meta_update = self._apply_talk_caps(
             current_relationship=relationship,
             proposed_affection=proposed_affection,
             proposed_trust=proposed_trust,
-            world_day=int(world.get("day", 1) or 1),
+            world_day=world_day_int,
             personality=personality,
         )
+
+        # HH-006 shared-weather affection bonus (Hugo "earning his respect").
+        # A "rainy day greeting" or an "evening greeting" lands +N affection on
+        # top of the capped talk delta when the world is actually rainy or in
+        # the named time-of-day. The bonus bypasses the daily talk cap so it
+        # actually reaches the player→villager relationship row, but only fires
+        # once per in-game day per (player, villager) so Heather cannot spam
+        # weather mentions to grind affection. The bonus is hidden from the
+        # public payload — clients only see the resulting affection value.
+        relationship_metadata = relationship.get("metadata") or {}
+        shared_weather_bonus, shared_weather_marker = self._shared_weather_bonus(
+            personality=personality,
+            player_text=text,
+            world=world,
+            relationship_metadata=relationship_metadata,
+            world_day=world_day_int,
+        )
+        bonus_metadata: dict[str, Any] = {}
+        if shared_weather_bonus > 0:
+            bonus_metadata["last_shared_weather_day"] = world_day_int
+            if shared_weather_marker:
+                bonus_metadata["last_shared_weather_marker"] = shared_weather_marker
+
+        # Stamp first_seen_day on the very first interaction so the trust-cap
+        # unlock has a stable reference point. Once present, the value is
+        # never overwritten — it represents the in-game day of first meeting.
+        first_seen_metadata: dict[str, Any] = {}
+        existing_first_seen = relationship_metadata.get("first_seen_day")
+        if not isinstance(existing_first_seen, int) or isinstance(existing_first_seen, bool):
+            first_seen_metadata["first_seen_day"] = world_day_int
+
+        total_affection_delta = int(capped_affection) + int(shared_weather_bonus)
         relationship = self.memory_store.update_relationship(
             villager_id,
             player_id,
-            affection_delta=capped_affection,
+            affection_delta=total_affection_delta,
             trust_delta=capped_trust,
             familiarity_delta=1,
             metadata={
                 "last_mood": mood,
                 "last_memory_id": memory_id,
                 **talk_meta_update,
+                **bonus_metadata,
+                **first_seen_metadata,
             },
         )
 
@@ -354,6 +389,15 @@ class ConversationEngine:
                 "repeat_count_in_window": repeat_count_in_window,
             },
         )
+        # Stamp first_seen_day on the very first interaction (gift counts too)
+        # so the trust-cap unlock has a stable reference point. Once present,
+        # the value is never overwritten — it represents the in-game day of
+        # first meeting regardless of which path (talk or gift) ran first.
+        gift_first_seen_metadata: dict[str, Any] = {}
+        existing_first_seen = current_metadata.get("first_seen_day")
+        if not isinstance(existing_first_seen, int) or isinstance(existing_first_seen, bool):
+            gift_first_seen_metadata["first_seen_day"] = world_day
+
         relationship = self.memory_store.update_relationship(
             villager_id,
             player_id,
@@ -369,6 +413,7 @@ class ConversationEngine:
                 "last_memory_id": memory_id,
                 "gift_first_done": True,
                 "recent_gifts": recent_gifts,
+                **gift_first_seen_metadata,
             },
         )
 
@@ -805,7 +850,17 @@ Relevant villager relationships:
 
         current_affection = int(current_relationship.get("affection", 0))
 
-        affection_cap, trust_cap, negative_cap = self._effective_talk_caps(personality)
+        first_seen_day_raw = metadata.get("first_seen_day")
+        first_seen_day = (
+            int(first_seen_day_raw)
+            if isinstance(first_seen_day_raw, int) and not isinstance(first_seen_day_raw, bool)
+            else None
+        )
+        affection_cap, trust_cap, negative_cap = self._effective_talk_caps(
+            personality,
+            first_seen_day=first_seen_day,
+            world_day=int(world_day),
+        )
 
         # Affection: cap positive gains, soften negatives.
         affection_delta = int(proposed_affection)
@@ -1002,6 +1057,9 @@ Relevant villager relationships:
     @staticmethod
     def _effective_talk_caps(
         personality: Personality | None,
+        *,
+        first_seen_day: int | None = None,
+        world_day: int | None = None,
     ) -> tuple[int, int, int]:
         """Resolve per-villager talk caps from the optional `tuning` block.
 
@@ -1011,6 +1069,18 @@ Relevant villager relationships:
         Negative tuning values are ignored — the global default takes over —
         so a typo in JSON can't accidentally lock a villager at "no talk gains
         ever" without an explicit zero.
+
+        HH-006 event-hook follow-up (Clover's day-5 trust unlock): when the
+        personality also supplies a positive ``trust_cap_unlocks_on_day`` and
+        the caller provides both ``first_seen_day`` (from relationship metadata)
+        and ``world_day`` (current in-game day), the ``trust_per_talk_cap``
+        override is dropped once ``world_day >= first_seen_day + unlock_days``
+        so the global default trust cap takes over. Models the cozy "Clover was
+        testing whether Heather keeps her promises, and now they trust her"
+        arc described in docs/AI_ARCHITECTURE.md "Per-villager calibration".
+        When either argument is None, the unlock check is skipped — callers
+        who don't know the relationship's first_seen_day (e.g. social paths
+        or test scaffolds) safely get the steady-state override behaviour.
         """
         affection_cap = TALK_AFFECTION_DAILY_CAP
         trust_cap = TALK_TRUST_DAILY_CAP
@@ -1022,11 +1092,31 @@ Relevant villager relationships:
         if isinstance(override_affection, int) and override_affection >= 0:
             affection_cap = override_affection
         override_trust = tuning.get("trust_per_talk_cap")
-        if isinstance(override_trust, int) and override_trust >= 0:
+        trust_override_active = (
+            isinstance(override_trust, int) and override_trust >= 0
+        )
+        if trust_override_active:
             trust_cap = override_trust
         override_negative = tuning.get("negative_talk_per_day_cap")
         if isinstance(override_negative, int) and override_negative >= 0:
             negative_cap = override_negative
+
+        # Trust-cap unlock: once enough in-game days have passed since the
+        # player and villager first met, the trust override is dropped and the
+        # global default reasserts. This only relaxes a *tighter* override
+        # (e.g. Clover's `trust_per_talk_cap=0`); a villager whose override
+        # is already at or above the global default sees no change.
+        if trust_override_active:
+            unlock_days = tuning.get("trust_cap_unlocks_on_day")
+            if (
+                isinstance(unlock_days, int)
+                and unlock_days > 0
+                and isinstance(first_seen_day, int)
+                and isinstance(world_day, int)
+                and world_day >= first_seen_day + unlock_days
+                and trust_cap < TALK_TRUST_DAILY_CAP
+            ):
+                trust_cap = TALK_TRUST_DAILY_CAP
         return affection_cap, trust_cap, negative_cap
 
     @staticmethod
@@ -1064,6 +1154,83 @@ Relevant villager relationships:
         if isinstance(raw, int) and raw == 0:
             return False
         return True
+
+    @staticmethod
+    def _shared_weather_bonus(
+        *,
+        personality: Personality,
+        player_text: str,
+        world: dict[str, Any],
+        relationship_metadata: dict[str, Any],
+        world_day: int,
+    ) -> tuple[int, str]:
+        """Resolve the HH-006 shared-weather affection bonus for one talk turn.
+
+        Returns ``(bonus, marker)``: ``bonus`` is the integer affection delta
+        to add on top of the capped talk delta (0 when the bonus does not
+        fire); ``marker`` is a short string identifying *what* matched
+        (``"rainy"``, ``"evening"``, etc.) so the metadata write can record
+        why the bonus fired without leaking that detail to the public payload.
+
+        The bonus fires when *all* of:
+
+        - the villager's personality supplies ``tuning.shared_weather_affection_bonus``
+          as a positive integer;
+        - the player's text mentions a weather word (rain/drizzle/storm) that
+          matches the current world weather, or a time-of-day word that
+          matches the world's ``time_label``;
+        - the bonus has not already fired for this (player, villager) pair on
+          the current in-game day (tracked via ``last_shared_weather_day`` on
+          the relationship metadata).
+
+        The bonus bypasses the daily affection cap because a "shared weather"
+        moment is meant to *land* — Hugo notices Heather noticed the rain.
+        The per-day fire guard prevents Heather from repeating "rain rain
+        rain" five times in a row to farm affection.
+        """
+        tuning = personality.tuning or {}
+        raw_bonus = tuning.get("shared_weather_affection_bonus")
+        if not isinstance(raw_bonus, int) or isinstance(raw_bonus, bool) or raw_bonus <= 0:
+            return 0, ""
+
+        last_shared_day = relationship_metadata.get("last_shared_weather_day")
+        if (
+            isinstance(last_shared_day, int)
+            and not isinstance(last_shared_day, bool)
+            and last_shared_day == int(world_day)
+        ):
+            return 0, ""
+
+        lowered_words = set(re.findall(r"[a-z']+", player_text.lower()))
+        if not lowered_words:
+            return 0, ""
+
+        weather = str(world.get("weather") or "").strip().lower()
+        time_label = str(world.get("time_label") or "").strip().lower()
+
+        # Weather words that need a matching world weather. Each row is
+        # (vocabulary the player might use, world-weather substring that must
+        # appear for the bonus to count as "shared"). The substring match keeps
+        # this resilient to future weather values like "light_rain" or
+        # "rain_clearing" without rewiring the table.
+        weather_word_groups: tuple[tuple[set[str], str], ...] = (
+            ({"rain", "rainy", "raining", "drizzle", "drizzling"}, "rain"),
+            ({"storm", "stormy", "thunder"}, "storm"),
+            ({"snow", "snowy", "snowing"}, "snow"),
+            ({"sun", "sunny", "sunshine"}, "clear"),
+            ({"cloud", "cloudy", "overcast"}, "cloud"),
+        )
+        for vocab, weather_marker in weather_word_groups:
+            if vocab & lowered_words and weather_marker in weather:
+                return int(raw_bonus), f"weather:{weather_marker}"
+
+        # Time-of-day vocabulary. The match requires the literal time label
+        # (``"morning"`` / ``"afternoon"`` / ``"evening"`` / ``"night"``) to
+        # appear in the player's text *and* to be the current time label.
+        if time_label and time_label in lowered_words:
+            return int(raw_bonus), f"time:{time_label}"
+
+        return 0, ""
 
     @staticmethod
     def _bump_gift_preference(preference: str) -> str:

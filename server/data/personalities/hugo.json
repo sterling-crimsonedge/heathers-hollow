@@ -20,7 +20,8 @@
   "loved_tags": ["bread", "tea", "rain", "sea", "wood", "well-made", "warm"],
   "tuning": {
     "affection_per_talk_cap": 1,
-    "loved_gift_mood_lock_hours": 3
+    "loved_gift_mood_lock_hours": 3,
+    "shared_weather_affection_bonus": 1
   },
   "relationships": {
     "heather": {

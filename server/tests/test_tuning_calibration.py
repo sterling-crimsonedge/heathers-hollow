@@ -448,6 +448,332 @@ async def run_first_gift_bonus_disable_check() -> None:
             memory_store.close()
 
 
+async def run_clover_trust_unlock_check() -> None:
+    """Clover's `trust_cap_unlocks_on_day=5` releases the trust override after day 5.
+
+    Per `docs/AI_ARCHITECTURE.md`: "Clover moves familiarity faster and trust
+    slower. Cap their trust at half the others' caps for the first 5 in-game
+    days, then unlock." We model that as `trust_per_talk_cap=0` for the lock
+    window plus `trust_cap_unlocks_on_day=5` so the override expires.
+
+    Test scenario: drive a personal-disclosure turn at Clover on day 1 (trust
+    stays at 0 because the override is active and `first_seen_day` is being
+    stamped). Then jump the world to day 6 (i.e. 5 in-game days after first
+    meeting) and drive another personal-disclosure turn — trust should now
+    land at the global default (1) because the unlock has fired.
+    """
+    with TemporaryDirectory() as tmp_dir:
+        memory_store = MemoryStore(Path(tmp_dir) / "tuning_clover_unlock.sqlite3")
+        engine = _make_engine(memory_store)
+
+        try:
+            player = "heather_clover_unlock"
+
+            # Turn 1: day 1. Override still active → trust stays at 0 even on
+            # a personal-disclosure turn. The relationship row gets
+            # first_seen_day=1 stamped so the unlock has a reference point.
+            response_day1 = await engine.handle_player_message(
+                player_id=player,
+                villager_id="clover",
+                text=POSITIVE_PERSONAL_TEXT,
+                context={"location": "brook", "test": "clover_unlock_day1"},
+            )
+            assert response_day1["relationship"]["trust"] == 0, response_day1["relationship"]
+
+            stored_day1 = memory_store.get_relationship("clover", player)
+            stored_meta_day1 = stored_day1.get("metadata") or {}
+            assert stored_meta_day1.get("first_seen_day") == 1, (
+                f"first_seen_day should be stamped on first interaction; "
+                f"got {stored_meta_day1!r}."
+            )
+
+            # Jump the world clock to day 6 by sliding start_minute_of_day
+            # forward by 5 in-game days (5 × 1440 minutes). The unlock
+            # condition is `world_day >= first_seen_day + 5`, so day 1 + 5 = 6
+            # is the first eligible day.
+            engine.world_state.start_minute_of_day += 5 * 1440
+            world_now = engine.world_state.snapshot()
+            assert world_now["day"] >= 6, (
+                f"Expected world to advance to day 6+; got {world_now!r}."
+            )
+
+            response_unlocked = await engine.handle_player_message(
+                player_id=player,
+                villager_id="clover",
+                text=POSITIVE_PERSONAL_TEXT,
+                context={"location": "brook", "test": "clover_unlock_day6"},
+            )
+            assert response_unlocked["relationship"]["trust"] == 1, (
+                f"After day-5 unlock, Clover's trust cap should revert to the "
+                f"global default (1); got {response_unlocked['relationship']!r}."
+            )
+
+            # The first_seen_day field must not have been overwritten by the
+            # day-6 update — it's a frozen first-meeting marker.
+            stored_unlocked = memory_store.get_relationship("clover", player)
+            stored_meta_unlocked = stored_unlocked.get("metadata") or {}
+            assert stored_meta_unlocked.get("first_seen_day") == 1, (
+                f"first_seen_day must not be overwritten by later turns; "
+                f"got {stored_meta_unlocked!r}."
+            )
+        finally:
+            memory_store.close()
+
+
+async def run_clover_trust_unlock_locked_window_check() -> None:
+    """Before the unlock fires, Clover's trust cap stays at the override (0).
+
+    Drives a personal-disclosure turn at Clover on day 5 (still inside the
+    5-day lock window since first_seen_day=1 → unlock at day 6). Trust must
+    still cap at 0 — the unlock is strictly `>=` so day 5 is the *last* day
+    the override holds.
+    """
+    with TemporaryDirectory() as tmp_dir:
+        memory_store = MemoryStore(Path(tmp_dir) / "tuning_clover_locked.sqlite3")
+        engine = _make_engine(memory_store)
+
+        try:
+            player = "heather_clover_locked"
+
+            await engine.handle_player_message(
+                player_id=player,
+                villager_id="clover",
+                text=POSITIVE_PERSONAL_TEXT,
+                context={"location": "brook", "test": "clover_locked_day1"},
+            )
+
+            # Slide to day 5 — still within the lock window (need day 6+).
+            engine.world_state.start_minute_of_day += 4 * 1440
+            world_now = engine.world_state.snapshot()
+            assert world_now["day"] == 5, (
+                f"Expected world to land on day 5; got {world_now!r}."
+            )
+
+            response_day5 = await engine.handle_player_message(
+                player_id=player,
+                villager_id="clover",
+                text=POSITIVE_PERSONAL_TEXT,
+                context={"location": "brook", "test": "clover_locked_day5"},
+            )
+            assert response_day5["relationship"]["trust"] == 0, (
+                f"On day 5 (before the day-6 unlock), Clover's trust must "
+                f"still cap at the override (0); got "
+                f"{response_day5['relationship']!r}."
+            )
+        finally:
+            memory_store.close()
+
+
+async def run_hugo_shared_weather_bonus_check() -> None:
+    """Hugo's shared-weather bonus lands when the player notices the weather.
+
+    Per `docs/AI_ARCHITECTURE.md`: "Hugo is slow-trust, slow-fall. His
+    affection should move +1 less than the baseline for the first three
+    visits, then move +1 more than the baseline after a 'shared weather'
+    line." We model the second half as `shared_weather_affection_bonus=1` —
+    a player text that mentions the current weather (rainy day) or time
+    label (evening greeting) adds +1 affection on top of the capped talk
+    delta, bypassing the per-day affection cap so the moment actually
+    lands.
+
+    Four readings:
+      - Rainy world + "I love this rain" → +1 affection bonus stacks on
+        the +1 cap (total +2). The bonus fires once.
+      - Repeating the same rainy mention on the *same* in-game day must
+        not fire again (anti-spam).
+      - Day rollover allows another bonus fire.
+      - Clear world + "I love this rain" → no bonus.
+    """
+    # Case A: bonus fires once on rainy day, stacks past the affection cap.
+    with TemporaryDirectory() as tmp_dir:
+        memory_store = MemoryStore(Path(tmp_dir) / "tuning_hugo_weather_rainy.sqlite3")
+        engine = _make_engine(memory_store)
+        engine.world_state.weather = "rainy"
+
+        try:
+            player = "heather_hugo_rainy"
+
+            # Burn the first-of-kind bonus separately so the bonus delta isn't
+            # masked by a Margot-style "first gift is a tier warmer" effect.
+            response = await engine.handle_player_message(
+                player_id=player,
+                villager_id="hugo",
+                text="thanks Hugo, I love this rain on the bakery roof",
+                context={"location": "shop", "test": "hugo_weather_rainy_a"},
+            )
+            # Hugo's affection cap is 1 (from his tuning) plus the +1 bonus.
+            # The text contains positive words ("thanks", "love") so the base
+            # delta is +1. Total expected affection = 1 (capped) + 1 (bonus) = 2.
+            assert response["relationship"]["affection"] == 2, (
+                f"Rainy-day shared-weather bonus should stack past the cap; "
+                f"got {response['relationship']!r}."
+            )
+
+            stored = memory_store.get_relationship("hugo", player)
+            stored_meta = stored.get("metadata") or {}
+            assert stored_meta.get("last_shared_weather_day") == 1, stored_meta
+            marker = stored_meta.get("last_shared_weather_marker")
+            assert isinstance(marker, str) and marker.startswith("weather:rain"), (
+                f"Expected weather:rain marker; got {marker!r}."
+            )
+            assert stored_meta.get("first_seen_day") == 1, stored_meta
+
+            # Case A2: another rainy mention on the same in-game day must NOT
+            # fire the bonus again. The base talk path is also already capped,
+            # so a second positive turn lands no further affection at all.
+            response_repeat = await engine.handle_player_message(
+                player_id=player,
+                villager_id="hugo",
+                text="thanks Hugo, I love this rain even more today",
+                context={"location": "shop", "test": "hugo_weather_rainy_repeat"},
+            )
+            assert response_repeat["relationship"]["affection"] == 2, (
+                f"Shared-weather bonus must not refire on the same in-game day; "
+                f"got {response_repeat['relationship']!r}."
+            )
+        finally:
+            memory_store.close()
+
+    # Case B: day rollover allows the bonus to fire again on a new in-game day.
+    with TemporaryDirectory() as tmp_dir:
+        memory_store = MemoryStore(Path(tmp_dir) / "tuning_hugo_weather_dayroll.sqlite3")
+        engine = _make_engine(memory_store)
+        engine.world_state.weather = "rainy"
+
+        try:
+            player = "heather_hugo_dayroll"
+            await engine.handle_player_message(
+                player_id=player,
+                villager_id="hugo",
+                text="thanks Hugo, the rain is so cozy this morning",
+                context={"location": "shop", "test": "hugo_weather_dayroll_day1"},
+            )
+            stored_after_day1 = memory_store.get_relationship("hugo", player)
+            assert stored_after_day1["affection"] == 2, stored_after_day1
+
+            # Slide world clock to day 2 so the bonus is eligible to fire again.
+            engine.world_state.start_minute_of_day += 1 * 1440
+            world_now = engine.world_state.snapshot()
+            assert world_now["day"] == 2, world_now
+
+            response_day2 = await engine.handle_player_message(
+                player_id=player,
+                villager_id="hugo",
+                text="thanks Hugo, more rain again - lovely",
+                context={"location": "shop", "test": "hugo_weather_dayroll_day2"},
+            )
+            # Day-2 talk caps reset (+1 cap + +1 bonus = +2 on day 2 on top of
+            # the day-1 total of 2) → cumulative affection = 4.
+            assert response_day2["relationship"]["affection"] == 4, (
+                f"Shared-weather bonus should re-fire on a new in-game day; "
+                f"got {response_day2['relationship']!r}."
+            )
+            stored_day2 = memory_store.get_relationship("hugo", player)
+            assert (stored_day2.get("metadata") or {}).get(
+                "last_shared_weather_day"
+            ) == 2, stored_day2
+        finally:
+            memory_store.close()
+
+    # Case C: clear world + rain mention → no bonus.
+    with TemporaryDirectory() as tmp_dir:
+        memory_store = MemoryStore(Path(tmp_dir) / "tuning_hugo_weather_clear.sqlite3")
+        engine = _make_engine(memory_store)
+        engine.world_state.weather = "clear"
+
+        try:
+            player = "heather_hugo_clear"
+            response = await engine.handle_player_message(
+                player_id=player,
+                villager_id="hugo",
+                text="thanks Hugo, I love this rain on the bakery roof",
+                context={"location": "shop", "test": "hugo_weather_clear"},
+            )
+            # No bonus → just the +1 capped affection from the positive talk.
+            assert response["relationship"]["affection"] == 1, (
+                f"Shared-weather bonus must not fire when the world is clear; "
+                f"got {response['relationship']!r}."
+            )
+            stored = memory_store.get_relationship("hugo", player)
+            stored_meta = stored.get("metadata") or {}
+            assert "last_shared_weather_day" not in stored_meta, stored_meta
+        finally:
+            memory_store.close()
+
+
+async def run_hugo_shared_evening_bonus_check() -> None:
+    """Hugo's bonus also fires on an "evening greeting" when time_label matches.
+
+    The shared-weather hook intentionally covers time-of-day language too —
+    "good evening, Hugo" on the evening time_label is the same cozy moment
+    as a rainy-day greeting. The match requires the literal time label word
+    in the text *and* the world's current time_label to be that value.
+    """
+    with TemporaryDirectory() as tmp_dir:
+        memory_store = MemoryStore(Path(tmp_dir) / "tuning_hugo_evening.sqlite3")
+        engine = _make_engine(memory_store)
+        # Slide the world clock to 17:00 (start_minute_of_day=8*60=480 by
+        # default; 17:00 = 1020 minutes from the start of day). This puts
+        # time_label at "evening".
+        engine.world_state.start_minute_of_day = 17 * 60
+        world_now = engine.world_state.snapshot()
+        assert world_now["time_label"] == "evening", world_now
+
+        try:
+            response = await engine.handle_player_message(
+                player_id="heather_hugo_evening",
+                villager_id="hugo",
+                text="thanks Hugo, good evening to you",
+                context={"location": "shop", "test": "hugo_evening_bonus"},
+            )
+            # +1 capped + +1 bonus = +2 affection.
+            assert response["relationship"]["affection"] == 2, (
+                f"Evening shared-weather bonus should stack past the cap; "
+                f"got {response['relationship']!r}."
+            )
+            stored = memory_store.get_relationship("hugo", "heather_hugo_evening")
+            stored_meta = stored.get("metadata") or {}
+            marker = stored_meta.get("last_shared_weather_marker")
+            assert marker == "time:evening", (
+                f"Expected time:evening marker; got {marker!r}."
+            )
+        finally:
+            memory_store.close()
+
+
+async def run_fern_no_shared_weather_bonus_check() -> None:
+    """Fern has no `shared_weather_affection_bonus`, so the hook is a no-op.
+
+    This is the regression guardrail: the bonus is opt-in. A villager without
+    the tuning key must see no bonus and no `last_shared_weather_day` write
+    on the relationship row even when the player mentions matching weather.
+    """
+    with TemporaryDirectory() as tmp_dir:
+        memory_store = MemoryStore(Path(tmp_dir) / "tuning_fern_no_bonus.sqlite3")
+        engine = _make_engine(memory_store)
+        engine.world_state.weather = "rainy"
+
+        try:
+            response = await engine.handle_player_message(
+                player_id="heather_fern_no_bonus",
+                villager_id="fern",
+                text="thanks Fern, I love this rain on the garden",
+                context={"location": "garden", "test": "fern_no_bonus"},
+            )
+            # Fern's affection cap is the default (2), and the talk text has
+            # positive words → +1 affection. No bonus stacks on top.
+            assert response["relationship"]["affection"] == 1, (
+                f"Fern (no shared_weather_affection_bonus) should not gain "
+                f"a bonus; got {response['relationship']!r}."
+            )
+            stored = memory_store.get_relationship("fern", "heather_fern_no_bonus")
+            stored_meta = stored.get("metadata") or {}
+            assert "last_shared_weather_day" not in stored_meta, stored_meta
+            assert "last_shared_weather_marker" not in stored_meta, stored_meta
+        finally:
+            memory_store.close()
+
+
 async def run_all_checks() -> None:
     await run_margot_slow_warming_check()
     await run_hugo_gruff_talk_check()
@@ -455,6 +781,11 @@ async def run_all_checks() -> None:
     await run_fern_default_caps_check()
     await run_loved_gift_pin_duration_check()
     await run_first_gift_bonus_disable_check()
+    await run_clover_trust_unlock_check()
+    await run_clover_trust_unlock_locked_window_check()
+    await run_hugo_shared_weather_bonus_check()
+    await run_hugo_shared_evening_bonus_check()
+    await run_fern_no_shared_weather_bonus_check()
 
 
 def main() -> None:

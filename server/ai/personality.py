@@ -68,6 +68,18 @@ class Personality:
     #   - first_gift_bonus_tier (int): 1 keeps the HH-006 first-of-kind bump,
     #       0 disables it for this villager (they are too gruff to be wooed by
     #       the gesture-of-bringing-anything)
+    #   - trust_cap_unlocks_on_day (int > 0): days after first meeting after
+    #       which the per-villager `trust_per_talk_cap` override is dropped
+    #       and the global default trust cap takes over. Models the cozy
+    #       "they were testing whether Heather keeps promises, and now they
+    #       trust her" arc — currently used by Clover (5 days).
+    #   - shared_weather_affection_bonus (int >= 0): extra affection delta
+    #       added when the player's text mentions the world's current weather
+    #       or time-of-day (a "rainy day greeting" or an "evening greeting").
+    #       The bonus stacks on top of the normal affection delta and bypasses
+    #       the daily affection cap, but only fires once per in-game day per
+    #       (player, villager) pair so it cannot be spammed. Currently used
+    #       by Hugo (1) — see docs/AI_ARCHITECTURE.md "Per-villager calibration".
     # Defaults match the global constants so omitting `tuning` keeps current
     # behaviour. Like `loved_tags`, `tuning` is *not* exposed in
     # `public_villager_summary` — the per-villager rubric is mechanically
@@ -126,6 +138,8 @@ class Personality:
             "trust_per_talk_cap",
             "negative_talk_per_day_cap",
             "first_gift_bonus_tier",
+            "trust_cap_unlocks_on_day",
+            "shared_weather_affection_bonus",
         ):
             if int_key in raw and raw[int_key] is not None:
                 try:
