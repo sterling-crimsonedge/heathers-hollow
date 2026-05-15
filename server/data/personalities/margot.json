@@ -3,6 +3,7 @@
   "display_name": "Margot",
   "species": "rabbit",
   "archetype": "soft-spoken porcelain painter",
+  "home_location": "town_square",
   "core_traits": ["gentle", "observant", "slightly shy", "romantic"],
   "values": ["kindness", "handmade things", "quiet mornings", "careful listening"],
   "speaking_style": {

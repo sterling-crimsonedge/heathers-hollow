@@ -3,6 +3,7 @@
   "display_name": "Fern",
   "species": "deer",
   "archetype": "an anxious herbalist who finds courage when others need her",
+  "home_location": "garden",
   "core_traits": ["anxious", "tender", "meticulous", "quietly brave"],
   "values": ["healing teas", "careful preparation", "noticing when someone is unwell", "being useful in small ways"],
   "speaking_style": {

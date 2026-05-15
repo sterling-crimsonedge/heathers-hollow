@@ -61,6 +61,15 @@ def run_personality_config_check() -> None:
                 low, high = bounds
                 assert low <= value <= high, f"{villager_id}.{subject_id}.{key} must be within {bounds}."
 
+        # home_location is optional but, when supplied, must be a non-empty
+        # string so clients can place the villager spatially. The current MVP
+        # cast (Margot/Fern/Hugo/Clover) all supply it; older configs may not.
+        assert isinstance(personality.home_location, str)
+        if personality.home_location:
+            assert personality.home_location.strip(), (
+                f"{villager_id} home_location, when set, must be a non-empty string."
+            )
+
         # Optional HH-060 enrichment fields: when supplied they must be well-typed
         # so the prompt_block lines stay readable. Absence is allowed for all four.
         assert isinstance(personality.quirks, list)
@@ -107,6 +116,23 @@ def run_personality_config_check() -> None:
     assert fern.prompt_block() != hugo.prompt_block()
     assert "fern" in store.list_ids()
     assert "hugo" in store.list_ids()
+
+    # The canonical MVP cast must each carry a distinct home_location so the
+    # web/Godot prototypes can place all four villagers spatially without
+    # hardcoded names. Defaults match docs/VILLAGER_CAST.md's spatial reads.
+    expected_home_locations = {
+        "margot": "town_square",
+        "fern": "garden",
+        "hugo": "shop",
+        "clover": "brook",
+    }
+    for villager_id, expected in expected_home_locations.items():
+        if villager_id not in store.list_ids():
+            continue
+        actual = store.load(villager_id).home_location
+        assert actual == expected, (
+            f"{villager_id} home_location is {actual!r}; expected {expected!r}."
+        )
 
 
 def main() -> None:

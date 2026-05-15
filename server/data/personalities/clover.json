@@ -3,6 +3,7 @@
   "display_name": "Clover",
   "species": "fox",
   "archetype": "a curious fox kit who collects broken treasures and tests every promise",
+  "home_location": "brook",
   "core_traits": ["curious", "openhearted", "easily distracted", "watchful underneath"],
   "values": ["fair trades", "small wonders", "kept promises", "being treated like a real person"],
   "speaking_style": {

@@ -33,9 +33,9 @@ const FALLBACK_VILLAGERS = [
   {
     id: "clover",
     display_name: "Clover",
-    species: "mouse",
+    species: "fox",
     archetype: "bright collector",
-    home_location: "town_square",
+    home_location: "brook",
     likes: ["marigolds", "buttons", "small treasures"],
   },
 ];

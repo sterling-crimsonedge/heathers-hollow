@@ -144,6 +144,24 @@ async def test_client_bootstrap_payload(server_module: ModuleType) -> None:
     assert "system_prompt" not in margot
     assert "private_goals" not in margot
 
+    # The canonical MVP cast must each carry a non-empty, JSON-driven
+    # home_location so clients can place all four villagers spatially. Clover
+    # specifically lives at "brook"; the other three keep their legacy spots.
+    villagers_by_id = {villager["id"]: villager for villager in payload["villagers"]}
+    expected_home_locations = {
+        "margot": "town_square",
+        "fern": "garden",
+        "hugo": "shop",
+        "clover": "brook",
+    }
+    for villager_id, expected in expected_home_locations.items():
+        if villager_id not in villagers_by_id:
+            continue
+        assert villagers_by_id[villager_id]["home_location"] == expected, (
+            f"{villager_id} bootstrap home_location should be {expected!r}; "
+            f"got {villagers_by_id[villager_id]['home_location']!r}."
+        )
+
     inventory = payload["inventory"]
     assert inventory["player_id"] == "bootstrap_player"
     assert inventory == await server_module.client_inventory(player_id="bootstrap_player")

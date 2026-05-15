@@ -517,10 +517,20 @@ async def handle_ws_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def public_villager_summary(personality: Personality) -> dict[str, Any]:
+    # Prefer the JSON-supplied home_location (data-driven, ships with the
+    # personality config). Fall back to the legacy hardcoded map for any
+    # villager whose JSON predates the `home_location` field, then to the
+    # canonical default "town_square" so clients always have something to
+    # place the villager on.
+    home_location = (
+        personality.home_location
+        or PUBLIC_HOME_LOCATIONS_BY_VILLAGER.get(personality.id)
+        or "town_square"
+    )
     return {
         "id": personality.id,
         "display_name": personality.display_name,
-        "home_location": PUBLIC_HOME_LOCATIONS_BY_VILLAGER.get(personality.id, "town_square"),
+        "home_location": home_location,
         "species": personality.species,
         "archetype": personality.archetype,
         "core_traits": personality.core_traits,

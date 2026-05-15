@@ -3,6 +3,9 @@ const LOCATION_POINTS = {
   garden: { x: -7, z: 3 },
   shop: { x: 7, z: -1 },
   player_house: { x: -1, z: 8 },
+  // Brook is Clover's home base — chipped saucer found in the brook, marigold
+  // bank, halfway between Margot and Hugo so the cast-doc triangles read.
+  brook: { x: 4, z: 5 },
 };
 
 const DEFAULT_VILLAGER_POINTS = [

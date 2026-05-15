@@ -3,6 +3,7 @@
   "display_name": "Hugo",
   "species": "bear",
   "archetype": "a retired sailor turned baker with a gruff shell and a soft heart",
+  "home_location": "shop",
   "core_traits": ["gruff", "protective", "story-rich", "sentimental", "steady"],
   "values": ["fresh bread", "keeping promises", "rain on a roof", "old stories told honestly", "feeding people well"],
   "speaking_style": {

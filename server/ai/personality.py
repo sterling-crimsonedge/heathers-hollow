@@ -47,6 +47,9 @@ class Personality:
     quirks: list[str] = field(default_factory=list)
     backstory_anchors: list[str] = field(default_factory=list)
     default_mood: str = ""
+    # Optional spatial placement hint for clients. Empty falls back to the
+    # server-side default ("town_square") so older configs stay valid.
+    home_location: str = ""
 
     @classmethod
     def from_json_file(cls, path: Path) -> "Personality":
@@ -73,6 +76,7 @@ class Personality:
             quirks=[str(item) for item in data.get("quirks", [])],
             backstory_anchors=[str(item) for item in data.get("backstory_anchors", [])],
             default_mood=str(data.get("default_mood", "")),
+            home_location=str(data.get("home_location", "")),
         )
 
     def starting_relationship(self, subject_id: str) -> dict[str, int]:
