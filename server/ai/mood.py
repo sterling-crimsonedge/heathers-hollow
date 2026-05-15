@@ -29,6 +29,14 @@ ADJACENT_MOODS = {
     "lonely": ["melancholy", "peaceful"],
 }
 
+# HH-006 cozy guardrail: villagers can have a bad morning, but they should never
+# live in foul-mood territory. After normalization any mood listed below is
+# clamped to its cap and the excess is redirected to that mood's neighbors.
+NEGATIVE_MOOD_INTENSITY_CAPS = {
+    "irritated": 0.7,
+    "anxious": 0.7,
+}
+
 
 class MoodTracker:
     """Stores slow-moving mood in the villager's self relationship metadata."""
@@ -48,6 +56,7 @@ class MoodTracker:
         scores = self._scores(state)
         scores[mood] += max(0.0, float(weight))
         scores = self._normalize(scores)
+        scores = self._clamp_negative_moods(scores)
         current = self._dominant_mood(scores)
         self._save_state(villager_id, scores, current)
         return current
@@ -64,6 +73,7 @@ class MoodTracker:
             scores[adjacent] += 0.04
 
         scores = self._normalize(scores)
+        scores = self._clamp_negative_moods(scores)
         current = self._dominant_mood(scores)
         self._save_state(villager_id, scores, current)
         return current
@@ -102,6 +112,33 @@ class MoodTracker:
         if total <= 0:
             return {"content": 1.0, **{mood: 0.0 for mood in MOODS if mood != "content"}}
         return {mood: scores.get(mood, 0.0) / total for mood in MOODS}
+
+    def _clamp_negative_moods(self, scores: dict[str, float]) -> dict[str, float]:
+        """Cap intensity of bad-mood scores so cozy villagers never stew.
+
+        For each mood listed in NEGATIVE_MOOD_INTENSITY_CAPS, if its normalized
+        score exceeds the cap we clamp it to the cap and redirect the excess to
+        its adjacent moods (or to `content` if it has none). This keeps the
+        distribution summing to 1.0 while preventing one harsh turn from leaving
+        a villager prickly all afternoon.
+        """
+        clamped = dict(scores)
+        for mood, cap in NEGATIVE_MOOD_INTENSITY_CAPS.items():
+            current = float(clamped.get(mood, 0.0))
+            if current <= cap:
+                continue
+            excess = current - cap
+            clamped[mood] = cap
+            neighbors = [
+                neighbor for neighbor in ADJACENT_MOODS.get(mood, []) if neighbor in clamped
+            ]
+            if not neighbors:
+                clamped["content"] = clamped.get("content", 0.0) + excess
+                continue
+            share = excess / len(neighbors)
+            for neighbor in neighbors:
+                clamped[neighbor] = float(clamped.get(neighbor, 0.0)) + share
+        return clamped
 
     def _dominant_mood(self, scores: dict[str, float]) -> str:
         if not scores:

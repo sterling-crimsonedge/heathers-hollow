@@ -389,7 +389,7 @@ The mobile app is out of MVP scope, but the server should avoid assumptions that
 
 ## Mood And Relationship Tuning Rules
 
-> Status: HH-006 tuning notes, drafted 2026-05-15 against the shipped code in `server/ai/conversation.py` and `server/ai/mood.py`. These are recommended values, not a code change. Codex should land them as a follow-up task; nothing here changes existing tests until explicitly adopted.
+> Status: HH-006 tuning notes, drafted 2026-05-15 against the shipped code in `server/ai/conversation.py` and `server/ai/mood.py`. The gift-path softening (disliked → melancholy at -1 affection, loved-gift mood-tracker nudge weight 2.5) shipped in the second Cowork overnight heartbeat. The talk-path daily caps, the personal-disclosure mood-nudge bump (0.45 → 0.6 when the player text uses `i`/`my`/`remember`/`feel`/`love`/`miss`), the disliked-gift mood-tracker nudge drop (0.55 → 0.35), and the cozy negative-mood intensity cap (`irritated`/`anxious` ≤ 0.7 with the excess redirected to adjacent moods) shipped in the seventh Cowork overnight heartbeat with coverage in `server/tests/test_talk_caps.py` and the extended `server/tests/test_mood.py`. Per-villager `tuning` JSON calibration, the first-of-kind gift bonus, repeated-gift dampening, and the persisted `mood_until` pin for loved gifts remain on the recommended-but-not-yet-shipped list below.
 
 ### Design intent
 

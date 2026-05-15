@@ -28,6 +28,15 @@ OLLAMA_DEFAULT_BASE_URL = "http://127.0.0.1:11434"
 OLLAMA_DEFAULT_MODEL = "llama3.2"
 OLLAMA_DEFAULT_TIMEOUT_SECONDS = 20.0
 
+# HH-006 talk-path tuning caps (see docs/AI_ARCHITECTURE.md "Mood And Relationship Tuning Rules").
+# These caps prevent slot-machine warmth and protect trust as the slow, precious score.
+TALK_AFFECTION_DAILY_CAP = 2
+TALK_TRUST_DAILY_CAP = 1
+TALK_NEGATIVE_DAILY_CAP = 1
+# Personal-disclosure conversation turns hit mood harder than small talk.
+TALK_MOOD_NUDGE_DEFAULT = 0.45
+TALK_MOOD_NUDGE_PERSONAL = 0.6
+
 
 class ConversationEngine:
     """Builds prompts, calls the configured LLM provider, and persists memory."""
@@ -101,7 +110,10 @@ class ConversationEngine:
         baseline_mood = self.mood_tracker.tick(villager_id, world, personality)
         mood = self._choose_mood(text, relationship, baseline_mood)
         if mood != baseline_mood:
-            self.mood_tracker.nudge(villager_id, self._server_mood_to_tracker_mood(mood), 0.45)
+            nudge_weight = (
+                TALK_MOOD_NUDGE_PERSONAL if self._looks_personal(text) else TALK_MOOD_NUDGE_DEFAULT
+            )
+            self.mood_tracker.nudge(villager_id, self._server_mood_to_tracker_mood(mood), nudge_weight)
         memories_used = [memory.id for memory in memories]
         social_memory_ids = [
             memory.id for memory in memories
@@ -146,13 +158,25 @@ class ConversationEngine:
             },
         )
 
+        proposed_affection = self._affection_delta(text)
+        proposed_trust = 1 if self._looks_personal(text) else 0
+        capped_affection, capped_trust, talk_meta_update = self._apply_talk_caps(
+            current_relationship=relationship,
+            proposed_affection=proposed_affection,
+            proposed_trust=proposed_trust,
+            world_day=int(world.get("day", 1) or 1),
+        )
         relationship = self.memory_store.update_relationship(
             villager_id,
             player_id,
-            affection_delta=self._affection_delta(text),
-            trust_delta=1 if self._looks_personal(text) else 0,
+            affection_delta=capped_affection,
+            trust_delta=capped_trust,
             familiarity_delta=1,
-            metadata={"last_mood": mood, "last_memory_id": memory_id},
+            metadata={
+                "last_mood": mood,
+                "last_memory_id": memory_id,
+                **talk_meta_update,
+            },
         )
 
         event = VillageEvent(
@@ -216,10 +240,13 @@ class ConversationEngine:
             "liked": "warm",
             "disliked": "melancholy",
         }.get(preference, "shy")
+        # HH-006: disliked gifts should hurt the villager's feelings, not redirect them
+        # into anxious territory. A softer tracker nudge (0.35) lets melancholy register
+        # without dominating the mood field on the next several ticks.
         gift_nudge_weight = {
             "loved": 2.5,
             "liked": 0.7,
-            "disliked": 0.55,
+            "disliked": 0.35,
             "neutral": 0.45,
         }.get(preference, 0.55)
         self.mood_tracker.nudge(villager_id, self._server_mood_to_tracker_mood(mood), gift_nudge_weight)
@@ -632,6 +659,75 @@ Relevant villager relationships:
         if lowered & NEGATIVE_WORDS:
             delta -= 1
         return delta
+
+    def _apply_talk_caps(
+        self,
+        *,
+        current_relationship: dict[str, Any],
+        proposed_affection: int,
+        proposed_trust: int,
+        world_day: int,
+    ) -> tuple[int, int, dict[str, Any]]:
+        """Apply per-in-game-day caps to talk-path affection and trust deltas.
+
+        Implements HH-006 tuning rules:
+        - Affection gain from talk is capped at TALK_AFFECTION_DAILY_CAP per in-game day.
+        - Trust gain from talk is capped at TALK_TRUST_DAILY_CAP per in-game day (the
+          slowest score; personal-disclosure earns trust at most once per day).
+        - Negative talk deltas are capped to a single -TALK_NEGATIVE_DAILY_CAP per
+          in-game day and never drop affection below 0 from talk alone — the hollow
+          notices, but it does not punish.
+
+        Returns (capped_affection_delta, capped_trust_delta, talk_meta_update). The
+        metadata update is intended to be merged into the relationship row by the
+        caller so the next turn sees the updated counters.
+        """
+        metadata = current_relationship.get("metadata") or {}
+        last_talk_day = metadata.get("last_talk_day")
+        if isinstance(last_talk_day, int) and last_talk_day == world_day:
+            talk_affection_today = int(metadata.get("talk_affection_today", 0) or 0)
+            talk_trust_today = int(metadata.get("talk_trust_today", 0) or 0)
+            talk_negative_today = int(metadata.get("talk_negative_today", 0) or 0)
+        else:
+            # New in-game day (or no prior talk recorded) — reset the daily counters.
+            talk_affection_today = 0
+            talk_trust_today = 0
+            talk_negative_today = 0
+
+        current_affection = int(current_relationship.get("affection", 0))
+
+        # Affection: cap positive gains, soften negatives.
+        affection_delta = int(proposed_affection)
+        if affection_delta > 0:
+            remaining_positive = max(0, TALK_AFFECTION_DAILY_CAP - talk_affection_today)
+            affection_delta = min(affection_delta, remaining_positive)
+        elif affection_delta < 0:
+            remaining_negative = max(0, TALK_NEGATIVE_DAILY_CAP - talk_negative_today)
+            magnitude = min(abs(affection_delta), remaining_negative)
+            affection_delta = -magnitude
+            if affection_delta < 0 and current_affection + affection_delta < 0:
+                # Never drop affection below 0 from talk alone.
+                if current_affection > 0:
+                    affection_delta = -current_affection
+                else:
+                    affection_delta = 0
+
+        # Trust: cap positive gains; negative trust from talk is never proposed today.
+        trust_delta = max(0, int(proposed_trust))
+        remaining_trust = max(0, TALK_TRUST_DAILY_CAP - talk_trust_today)
+        trust_delta = min(trust_delta, remaining_trust)
+
+        new_affection_today = talk_affection_today + max(0, affection_delta)
+        new_trust_today = talk_trust_today + max(0, trust_delta)
+        new_negative_today = talk_negative_today + (1 if affection_delta < 0 else 0)
+
+        talk_meta_update = {
+            "last_talk_day": int(world_day),
+            "talk_affection_today": int(new_affection_today),
+            "talk_trust_today": int(new_trust_today),
+            "talk_negative_today": int(new_negative_today),
+        }
+        return int(affection_delta), int(trust_delta), talk_meta_update
 
     def _looks_personal(self, text: str) -> bool:
         lowered = text.lower()
