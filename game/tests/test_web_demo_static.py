@@ -141,6 +141,53 @@ def test_scene_is_local_canvas_village() -> None:
     )
 
 
+def test_gift_picker_surfaces_full_starter_inventory() -> None:
+    """HH-062 follow-up: the gift picker must show every canonical
+    starter item, including the four cast-specific gifts each MVP
+    villager scores as "loved", so Heather can pick intentionally
+    rather than only sending Dusty Rose. Bootstrap inventory drives
+    the live picker, but the offline fallback also has to cover the
+    full catalog so the demo reads correctly with no server.
+    """
+    main_js = read_web_file("main.js")
+    index_html = read_web_file("index.html")
+
+    expected_item_ids = (
+        "dusty_rose",
+        "chamomile_bundle",
+        "porcelain_button",
+        "smooth_pebble",
+        "lavender_sachet",
+        "honey_oat_crust",
+        "marigold_sprig",
+        "sea_glass_shard",
+    )
+    for item_id in expected_item_ids:
+        assert f'item_id: "{item_id}"' in main_js, (
+            f"FALLBACK_INVENTORY must include the canonical starter id "
+            f"'{item_id}' so offline demo mode shows every gift."
+        )
+
+    # Gift button has a name + category caption stack and a tooltip
+    # sourced from the server's gift_prompt so the picker reads as
+    # personality rather than a flat list of names.
+    assert 'className = "gift-button"' in main_js
+    assert 'className = "gift-name"' in main_js
+    assert 'className = "gift-caption"' in main_js
+    assert "button.title = promptHint" in main_js
+    assert 'item.category || "gift"' in main_js
+    assert "dataset.itemId" in main_js
+    assert "dataset.category" in main_js
+
+    # CSS category hint stripes so the picker is scannable at a glance.
+    assert ".gift-button" in index_html
+    assert '.gift-button[data-category="flower"]' in index_html
+    assert '.gift-button[data-category="baked"]' in index_html
+    assert '.gift-button[data-category="trinket"]' in index_html
+    assert ".gift-name" in index_html
+    assert ".gift-caption" in index_html
+
+
 def test_web_readme_documents_run_path() -> None:
     readme = read_web_file("README.md")
 
@@ -159,6 +206,7 @@ def main() -> None:
     test_web_demo_does_not_use_legacy_worktree_protocol()
     test_web_demo_drops_worktree_cast_names()
     test_scene_is_local_canvas_village()
+    test_gift_picker_surfaces_full_starter_inventory()
     test_web_readme_documents_run_path()
     print("PASS: Root browser demo uses the canonical client protocol.")
 

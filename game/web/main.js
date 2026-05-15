@@ -40,11 +40,69 @@ const FALLBACK_VILLAGERS = [
   },
 ];
 
+// Mirrors `server/world/inventory.py:STARTER_INVENTORY` so the web demo's
+// offline / server-offline fallback still surfaces every canonical starter
+// gift, including the four HH-062 cast-specific items each canonical
+// villager scores as "loved". Keep this list in sync with the server
+// catalog; the gift picker hint copy below leans on `category` and
+// `gift_prompt` to guide intentional picks.
 const FALLBACK_INVENTORY = [
-  { item_id: "dusty_rose", display_name: "Dusty Rose", category: "flower", tags: ["flower", "garden"] },
-  { item_id: "chamomile_bundle", display_name: "Chamomile Bundle", category: "herb", tags: ["tea", "garden"] },
-  { item_id: "porcelain_button", display_name: "Porcelain Button", category: "keepsake", tags: ["porcelain"] },
-  { item_id: "smooth_pebble", display_name: "Smooth Pebble", category: "trinket", tags: ["stone"] },
+  {
+    item_id: "dusty_rose",
+    display_name: "Dusty Rose",
+    category: "flower",
+    tags: ["flower", "garden", "soft_color", "handmade"],
+    gift_prompt: "A soft dusty rose picked from Heather's garden.",
+  },
+  {
+    item_id: "chamomile_bundle",
+    display_name: "Chamomile Bundle",
+    category: "herb",
+    tags: ["flower", "tea", "garden", "handmade"],
+    gift_prompt: "A small bundle of chamomile tied with cotton thread.",
+  },
+  {
+    item_id: "porcelain_button",
+    display_name: "Porcelain Button",
+    category: "keepsake",
+    tags: ["porcelain", "handmade", "soft_color"],
+    gift_prompt: "A tiny glazed porcelain button with a pale blue flower.",
+  },
+  {
+    item_id: "smooth_pebble",
+    display_name: "Smooth Pebble",
+    category: "trinket",
+    tags: ["stone", "smooth", "pocket"],
+    gift_prompt: "A small smooth pebble from the path near the garden.",
+  },
+  {
+    item_id: "lavender_sachet",
+    display_name: "Lavender Sachet",
+    category: "herb",
+    tags: ["herb", "lavender", "handmade", "soft_color"],
+    gift_prompt: "A small linen sachet of dried lavender, hand-stitched closed.",
+  },
+  {
+    item_id: "honey_oat_crust",
+    display_name: "Honey Oat Crust",
+    category: "baked",
+    tags: ["bread", "baked", "warm", "handmade"],
+    gift_prompt: "A small heel of warm honey oat bread saved from this morning's bake.",
+  },
+  {
+    item_id: "marigold_sprig",
+    display_name: "Marigold Sprig",
+    category: "flower",
+    tags: ["flower", "marigold", "orange", "garden"],
+    gift_prompt: "A bright orange marigold sprig with one slightly bent petal.",
+  },
+  {
+    item_id: "sea_glass_shard",
+    display_name: "Sea Glass Shard",
+    category: "trinket",
+    tags: ["shiny", "broken", "keepsake", "smooth", "sea"],
+    gift_prompt: "A frosted shard of pale-green sea glass smoothed by saltwater.",
+  },
 ];
 
 const dom = {
@@ -345,7 +403,31 @@ function renderGiftRow() {
   for (const item of state.inventory) {
     const button = document.createElement("button");
     button.type = "button";
-    button.textContent = item.display_name || item.item_id || "Gift";
+    button.className = "gift-button";
+    button.dataset.itemId = item.item_id || "";
+    button.dataset.category = item.category || "";
+
+    const name = document.createElement("span");
+    name.className = "gift-name";
+    name.textContent = item.display_name || item.item_id || "Gift";
+
+    const caption = document.createElement("span");
+    caption.className = "gift-caption";
+    caption.textContent = item.category || "gift";
+
+    button.append(name, caption);
+
+    // The hover tooltip leans on the server's `gift_prompt`, giving the
+    // player a one-line sensory hint so the picker reads as personality
+    // rather than a flat list of names.
+    const promptHint = String(item.gift_prompt || "").trim();
+    if (promptHint) {
+      button.title = promptHint;
+      button.setAttribute("aria-label", `${name.textContent} - ${promptHint}`);
+    } else {
+      button.setAttribute("aria-label", name.textContent);
+    }
+
     button.addEventListener("click", () => sendGift(item));
     dom.giftRow.appendChild(button);
   }
