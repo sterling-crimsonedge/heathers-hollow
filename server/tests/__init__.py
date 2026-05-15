@@ -1,0 +1,1 @@
+"""Server smoke tests."""

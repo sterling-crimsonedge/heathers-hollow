@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Heather's Hollow — Codex Edition</title>
+<style>
+  :root {
+    --bg: #fdf6ec; --card: #fff8ef; --border: #e8d5b7;
+    --text: #5a4a3a; --accent: #8b6f5a; --highlight: #d4a574;
+    --green: #7a9e7e; --blue: #7a8fa0; --rose: #c48b8b;
+    --shadow: rgba(139,111,90,0.12);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Georgia', serif; background: var(--bg); color: var(--text);
+    display: flex; flex-direction: column; height: 100vh; overflow: hidden;
+  }
+  header {
+    text-align: center; padding: 12px; border-bottom: 2px solid var(--border);
+    background: linear-gradient(180deg, #fff8ef 0%, #fdf6ec 100%);
+  }
+  header h1 { font-size: 1.4rem; color: var(--accent); letter-spacing: 1px; }
+  header .clock { font-size: 0.85rem; color: var(--highlight); margin-top: 2px; }
+  .main { display: flex; flex: 1; overflow: hidden; }
+
+  /* Sidebar — villager cards */
+  #sidebar {
+    width: 220px; padding: 12px; border-right: 2px solid var(--border);
+    overflow-y: auto; background: var(--card);
+  }
+  #sidebar h2 { font-size: 0.9rem; color: var(--accent); margin-bottom: 10px; text-transform: uppercase; letter-spacing: 1px; }
+  .villager-card {
+    background: var(--bg); border: 1.5px solid var(--border); border-radius: 10px;
+    padding: 12px; margin-bottom: 10px; cursor: pointer; transition: all 0.2s;
+  }
+  .villager-card:hover, .villager-card.active {
+    border-color: var(--highlight); box-shadow: 0 2px 8px var(--shadow);
+    transform: translateY(-1px);
+  }
+  .villager-card .name { font-weight: bold; font-size: 1rem; }
+  .villager-card .species { font-size: 0.8rem; color: var(--accent); }
+  .villager-card .mood { font-size: 0.75rem; margin-top: 4px; padding: 2px 8px; border-radius: 10px; display: inline-block; }
+  .mood-content { background: #e8f0e8; color: var(--green); }
+  .mood-cheerful { background: #fef3e0; color: #c48b3a; }
+  .mood-anxious { background: #f0e8e8; color: var(--rose); }
+  .mood-melancholy { background: #e8eaf0; color: var(--blue); }
+  .mood-curious { background: #f0eee8; color: #8b7a5a; }
+  .mood-nostalgic { background: #ede8f0; color: #8b7a9e; }
+
+  /* Chat area */
+  #chat-area {
+    flex: 1; display: flex; flex-direction: column; min-width: 0;
+  }
+  #chat-header {
+    padding: 10px 16px; border-bottom: 1px solid var(--border);
+    background: var(--card); font-size: 0.95rem;
+  }
+  #chat-header .villager-name { font-weight: bold; color: var(--accent); }
+  #chat-header .villager-desc { font-size: 0.8rem; color: #999; }
+  #messages {
+    flex: 1; overflow-y: auto; padding: 16px; display: flex;
+    flex-direction: column; gap: 10px;
+  }
+  .message {
+    max-width: 75%; padding: 10px 14px; border-radius: 14px;
+    font-size: 0.92rem; line-height: 1.5; word-wrap: break-word;
+  }
+  .message.player {
+    align-self: flex-end; background: var(--highlight); color: #fff;
+    border-bottom-right-radius: 4px;
+  }
+  .message.villager {
+    align-self: flex-start; background: var(--card); border: 1px solid var(--border);
+    border-bottom-left-radius: 4px;
+  }
+  .message.system {
+    align-self: center; background: transparent; color: var(--accent);
+    font-style: italic; font-size: 0.82rem; text-align: center;
+  }
+  #input-area {
+    padding: 12px 16px; border-top: 2px solid var(--border); background: var(--card);
+    display: flex; gap: 8px;
+  }
+  #msg-input {
+    flex: 1; padding: 10px 14px; border: 1.5px solid var(--border); border-radius: 20px;
+    font-family: inherit; font-size: 0.9rem; outline: none; background: var(--bg);
+  }
+  #msg-input:focus { border-color: var(--highlight); }
+  #send-btn, .gift-btn {
+    padding: 8px 18px; border: none; border-radius: 20px; cursor: pointer;
+    font-family: inherit; font-size: 0.85rem; font-weight: bold;
+    background: var(--accent); color: #fff; transition: background 0.2s;
+  }
+  #send-btn:hover, .gift-btn:hover { background: var(--highlight); }
+  #send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* Gift bar */
+  #gift-bar {
+    padding: 8px 16px; border-top: 1px solid var(--border); background: var(--bg);
+    display: flex; gap: 6px; align-items: center; flex-wrap: wrap;
+  }
+  #gift-bar label { font-size: 0.8rem; color: var(--accent); font-weight: bold; }
+  .gift-btn { font-size: 0.78rem; padding: 5px 12px; background: var(--green); }
+  .gift-btn:hover { background: #6a8e6e; }
+
+  /* Context panel */
+  #context-panel {
+    width: 240px; padding: 12px; border-left: 2px solid var(--border);
+    overflow-y: auto; background: var(--card); font-size: 0.82rem;
+  }
+  #context-panel h3 {
+    font-size: 0.8rem; color: var(--accent); text-transform: uppercase;
+    letter-spacing: 1px; margin-bottom: 6px; margin-top: 12px;
+  }
+  #context-panel h3:first-child { margin-top: 0; }
+  #context-panel p, #context-panel li { line-height: 1.5; margin-bottom: 4px; }
+  #context-panel ul { padding-left: 16px; }
+  .ctx-label { font-weight: bold; color: var(--accent); }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  /* No villager selected */
+  .placeholder {
+    flex: 1; display: flex; align-items: center; justify-content: center;
+    color: var(--accent); font-style: italic; font-size: 1.1rem; text-align: center;
+    padding: 40px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Heather's Hollow</h1>
+  <div class="clock" id="world-clock">Loading world...</div>
+</header>
+
+<div class="main">
+  <aside id="sidebar">
+    <h2>Villagers</h2>
+    <div id="villager-list">Loading...</div>
+  </aside>
+
+  <section id="chat-area">
+    <div class="placeholder" id="placeholder">
+      Select a villager to start a conversation
+    </div>
+  </section>
+
+  <aside id="context-panel">
+    <h3>Context</h3>
+    <p id="ctx-content" style="color:#999; font-style:italic;">Select a villager to see context</p>
+  </aside>
+</div>
+
+<script>
+const API = 'http://127.0.0.1:8765';
+let ws = null;
+let currentVillager = null;
+let villagers = {};
+let inventory = [];
+let chatHistories = {};
+
+// --- Bootstrap ---
+async function init() {
+  try {
+    const res = await fetch(API + '/client/bootstrap');
+    const data = await res.json();
+    villagers = {};
+    data.villagers.forEach(v => { villagers[v.id] = v; });
+    inventory = (data.inventory && data.inventory.items) ? data.inventory.items : [];
+    updateClock(data.world);
+    renderVillagerList();
+  } catch (e) {
+    document.getElementById('villager-list').innerHTML = '<p style="color:var(--rose)">Could not connect to server.<br>Is it running on port 8765?</p>';
+  }
+}
+
+function updateClock(world) {
+  const el = document.getElementById('world-clock');
+  if (world) {
+    el.textContent = `Day ${world.day} | ${world.clock} (${world.time_label}) | ${world.season} | ${world.weather}`;
+  }
+}
+
+// --- Villager list ---
+function renderVillagerList() {
+  const container = document.getElementById('villager-list');
+  container.innerHTML = '';
+  for (const [id, v] of Object.entries(villagers)) {
+    const card = document.createElement('div');
+    card.className = 'villager-card' + (currentVillager === id ? ' active' : '');
+    const mood = v.mood || 'content';
+    const emoji = {rabbit:'&#129361;', deer:'&#129420;', bear:'&#128059;'}[v.species] || '&#128049;';
+    card.innerHTML = `
+      <div class="name">${emoji} ${v.display_name || v.name}</div>
+      <div class="species">${v.species} &middot; ${v.archetype || v.role || ''}</div>
+      <div class="mood mood-${mood}">${mood}</div>
+    `;
+    card.onclick = () => selectVillager(id);
+    container.appendChild(card);
+  }
+}
+
+// --- Select villager ---
+function selectVillager(id) {
+  currentVillager = id;
+  renderVillagerList();
+  renderChatUI();
+  loadContext(id);
+  connectWS(id);
+}
+
+function renderChatUI() {
+  const area = document.getElementById('chat-area');
+  const v = villagers[currentVillager];
+  area.innerHTML = `
+    <div id="chat-header">
+      <span class="villager-name">${v.display_name || v.name}</span>
+      <span class="villager-desc"> &mdash; ${v.archetype || v.role || v.species}</span>
+    </div>
+    <div id="messages"></div>
+    <div id="gift-bar">
+      <label>Gifts:</label>
+    </div>
+    <div id="input-area">
+      <input id="msg-input" placeholder="Say something to ${v.display_name || v.name}..." autocomplete="off" />
+      <button id="send-btn" onclick="sendMessage()">Send</button>
+    </div>
+  `;
+  // Render gift buttons
+  const giftBar = document.getElementById('gift-bar');
+  const items = inventory.length ? inventory : [{display_name:'Dusty Rose'},{display_name:'Chamomile Bundle'},{display_name:'Porcelain Button'},{display_name:'Smooth Pebble'}];
+  items.forEach(item => {
+    const name = typeof item === 'string' ? item : (item.display_name || item.name);
+    const btn = document.createElement('button');
+    btn.className = 'gift-btn';
+    btn.textContent = name;
+    btn.onclick = () => sendGift(name);
+    giftBar.appendChild(btn);
+  });
+
+  // Restore chat history
+  const msgs = document.getElementById('messages');
+  (chatHistories[currentVillager] || []).forEach(m => appendMessageEl(m.role, m.text));
+
+  // Enter key
+  document.getElementById('msg-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+  });
+}
+
+// --- Context panel ---
+async function loadContext(id) {
+  const panel = document.getElementById('ctx-content');
+  panel.innerHTML = 'Loading...';
+  try {
+    const res = await fetch(API + `/client/villagers/${id}/context`);
+    const ctx = await res.json();
+    const v = ctx.villager || ctx;
+    const rel = ctx.relationship || {};
+    const mems = ctx.recent_memories || ctx.memories || [];
+    let html = '';
+    html += `<h3>Personality</h3><p>${v.archetype || ctx.personality_summary || 'Unknown'}</p>`;
+    if (v.core_traits) html += `<p style="font-size:0.78rem;color:var(--accent);">${v.core_traits.join(', ')}</p>`;
+    html += `<h3>Mood</h3><p>${ctx.mood || rel.last_mood || 'Unknown'}</p>`;
+    if (rel && Object.keys(rel).length) {
+      html += `<h3>Relationship</h3>`;
+      html += `<p><span class="ctx-label">Affection:</span> ${rel.affection ?? '?'}</p>`;
+      html += `<p><span class="ctx-label">Trust:</span> ${rel.trust ?? '?'}</p>`;
+      html += `<p><span class="ctx-label">Familiarity:</span> ${rel.familiarity ?? '?'}</p>`;
+    }
+    if (mems.length) {
+      html += `<h3>Memories</h3><ul>`;
+      mems.forEach(m => { html += `<li>${typeof m === 'string' ? m : (m.summary || m.text || JSON.stringify(m))}</li>`; });
+      html += `</ul>`;
+    }
+    if (v.likes) {
+      html += `<h3>Likes</h3><p>${v.likes.join(', ')}</p>`;
+    }
+    panel.innerHTML = html;
+  } catch (e) {
+    panel.innerHTML = '<p style="color:var(--rose)">Could not load context</p>';
+  }
+}
+
+// --- WebSocket ---
+function connectWS(villagerId) {
+  if (ws) { ws.close(); ws = null; }
+  try {
+    ws = new WebSocket(`ws://127.0.0.1:8765/ws/conversation`);
+    ws.onopen = () => {
+      addSystemMessage(`Connected to ${(villagers[villagerId]||{}).display_name || villagerId}`);
+    };
+    ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        handleServerMessage(msg);
+      } catch (e) {
+        console.error('Bad message:', event.data);
+      }
+    };
+    ws.onclose = () => { addSystemMessage('Disconnected'); };
+    ws.onerror = () => { addSystemMessage('Connection error'); };
+  } catch (e) {
+    addSystemMessage('Could not connect WebSocket');
+  }
+}
+
+function handleServerMessage(msg) {
+  if (msg.type === 'server_status') {
+    if (msg.world) updateClock(msg.world);
+    return;
+  } else if (msg.type === 'villager_reply' || msg.type === 'reply') {
+    const text = msg.text || msg.message || msg.content || JSON.stringify(msg);
+    appendMessage('villager', text);
+    // Refresh context after reply
+    if (currentVillager) loadContext(currentVillager);
+  } else if (msg.type === 'gift_reaction') {
+    const text = msg.text || msg.reaction || msg.message || 'Received your gift!';
+    appendMessage('villager', text);
+    if (currentVillager) loadContext(currentVillager);
+  } else if (msg.type === 'error') {
+    addSystemMessage(msg.message || 'Server error');
+  } else {
+    console.log('Unhandled message type:', msg.type, msg);
+  }
+}
+
+// --- Send message ---
+function sendMessage() {
+  const input = document.getElementById('msg-input');
+  const text = input.value.trim();
+  if (!text || !ws || ws.readyState !== WebSocket.OPEN || !currentVillager) return;
+  appendMessage('player', text);
+  ws.send(JSON.stringify({
+    type: 'player_message',
+    villager_id: currentVillager,
+    text: text
+  }));
+  input.value = '';
+  input.focus();
+}
+
+function sendGift(itemName) {
+  if (!ws || ws.readyState !== WebSocket.OPEN || !currentVillager) return;
+  appendMessage('player', `[Gives ${itemName}]`);
+  ws.send(JSON.stringify({
+    type: 'gift_item',
+    villager_id: currentVillager,
+    item: itemName
+  }));
+}
+
+// --- Chat display ---
+function appendMessage(role, text) {
+  if (!chatHistories[currentVillager]) chatHistories[currentVillager] = [];
+  chatHistories[currentVillager].push({ role, text });
+  appendMessageEl(role, text);
+}
+
+function appendMessageEl(role, text) {
+  const msgs = document.getElementById('messages');
+  if (!msgs) return;
+  const div = document.createElement('div');
+  div.className = `message ${role}`;
+  div.textContent = text;
+  msgs.appendChild(div);
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+function addSystemMessage(text) {
+  const msgs = document.getElementById('messages');
+  if (!msgs) return;
+  const div = document.createElement('div');
+  div.className = 'message system';
+  div.textContent = text;
+  msgs.appendChild(div);
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+// --- Init ---
+init();
+</script>
+</body>
+</html>

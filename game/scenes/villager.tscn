@@ -1,0 +1,48 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://scripts/villager.gd" id="1_villager"]
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_villager"]
+radius = 0.38
+height = 1.15
+radial_segments = 12
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_villager"]
+albedo_color = Color(1, 0.964706, 0.901961, 1)
+roughness = 0.82
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_villager"]
+radius = 0.38
+height = 1.15
+
+[sub_resource type="SphereMesh" id="SphereMesh_cheeks"]
+radius = 0.075
+height = 0.15
+radial_segments = 8
+rings = 4
+
+[node name="Villager" type="CharacterBody3D" groups=["villager"]]
+script = ExtResource("1_villager")
+
+[node name="Body" type="MeshInstance3D" parent="."]
+position = Vector3(0, 0.575, 0)
+mesh = SubResource("CapsuleMesh_villager")
+surface_material_override/0 = SubResource("StandardMaterial3D_villager")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+position = Vector3(0, 0.575, 0)
+shape = SubResource("CapsuleShape3D_villager")
+
+[node name="LeftCheek" type="MeshInstance3D" parent="."]
+position = Vector3(-0.18, 0.78, -0.31)
+mesh = SubResource("SphereMesh_cheeks")
+
+[node name="RightCheek" type="MeshInstance3D" parent="."]
+position = Vector3(0.18, 0.78, -0.31)
+mesh = SubResource("SphereMesh_cheeks")
+
+[node name="NameLabel" type="Label3D" parent="."]
+position = Vector3(0, 1.42, 0)
+text = "Margot"
+font_size = 34
+pixel_size = 0.01

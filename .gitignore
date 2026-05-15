@@ -54,6 +54,9 @@ dist/
 *.swo
 *~
 
+# Claude Code worktrees (reference-only; do not commit per docs/CONSOLIDATION_PLAN.md)
+.claude/
+
 # OS
 .DS_Store
 .DS_Store?

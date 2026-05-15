@@ -1,5 +1,20 @@
-; Placeholder — real project.godot will be generated when Godot 4 is
-; installed and the project is opened/created through the editor.
-;
-; Working title: Heather's Hollow
-; Engine target: Godot 4.x
+config_version=5
+
+[application]
+
+config/name="Heather's Hollow"
+config/description="A cozy 3D village where Claude-powered villagers remember, grow, and surprise you."
+run/main_scene="res://scenes/main.tscn"
+config/features=PackedStringArray("4.3", "Forward Plus")
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+
+[rendering]
+
+renderer/rendering_method="forward_plus"
+environment/defaults/default_clear_color=Color(0.784314, 0.870588, 0.909804, 1)

@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Heather's Hollow</title>
+  <style>
+    :root {
+      --cream: #f8f0df;
+      --ivory: #fffaf0;
+      --sage: #93ad84;
+      --sage-dark: #5f7f5d;
+      --rose: #c9838b;
+      --blue: #88a9bf;
+      --clay: #b7785f;
+      --ink: #463d35;
+      --muted: #7d7166;
+      --line: #dcc9a8;
+      --shadow: rgba(70, 61, 53, 0.16);
+      --danger: #a85c63;
+      --ok: #638c65;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: var(--cream);
+      color: var(--ink);
+      font-family: "Avenir Next", "Helvetica Neue", Arial, sans-serif;
+      letter-spacing: 0;
+    }
+
+    button,
+    input {
+      font: inherit;
+    }
+
+    button {
+      border: 0;
+      border-radius: 8px;
+      background: var(--ink);
+      color: var(--ivory);
+      cursor: pointer;
+      padding: 9px 12px;
+      font-weight: 700;
+    }
+
+    button:hover:not(:disabled),
+    button:focus-visible:not(:disabled) {
+      background: var(--sage-dark);
+      outline: none;
+    }
+
+    button:disabled {
+      opacity: 0.42;
+      cursor: default;
+    }
+
+    #village-canvas {
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100vh;
+      display: block;
+      background: #b9d0c2;
+    }
+
+    .panel {
+      position: fixed;
+      background: rgba(255, 250, 240, 0.92);
+      border: 1px solid rgba(220, 201, 168, 0.9);
+      box-shadow: 0 12px 34px var(--shadow);
+      backdrop-filter: blur(10px);
+      border-radius: 8px;
+    }
+
+    .topbar {
+      top: 14px;
+      left: 14px;
+      right: 14px;
+      height: 58px;
+      display: grid;
+      grid-template-columns: minmax(180px, 1fr) auto minmax(180px, 1fr);
+      align-items: center;
+      gap: 12px;
+      padding: 9px 14px;
+    }
+
+    .brand {
+      min-width: 0;
+    }
+
+    .brand h1 {
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 22px;
+      color: #6b5748;
+      line-height: 1;
+    }
+
+    .brand p,
+    .world-line,
+    .server-line {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .world-line {
+      text-align: center;
+      color: #6f624f;
+      margin: 0;
+      font-weight: 700;
+    }
+
+    .server-line {
+      justify-self: end;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      max-width: 100%;
+      margin: 0;
+    }
+
+    .status-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 999px;
+      background: var(--danger);
+      flex: 0 0 auto;
+    }
+
+    .status-dot.ok {
+      background: var(--ok);
+    }
+
+    .villager-panel {
+      top: 88px;
+      left: 14px;
+      bottom: 14px;
+      width: min(300px, calc(100vw - 28px));
+      padding: 14px;
+      overflow: auto;
+    }
+
+    .context-panel {
+      top: 88px;
+      right: 14px;
+      width: 330px;
+      max-width: calc(100vw - 28px);
+      max-height: calc(100vh - 102px);
+      padding: 14px;
+      overflow: auto;
+    }
+
+    .chat-panel {
+      left: 330px;
+      right: 360px;
+      bottom: 14px;
+      min-height: 220px;
+      max-height: min(45vh, 380px);
+      display: grid;
+      grid-template-rows: auto 1fr auto auto;
+      overflow: hidden;
+    }
+
+    .section-label {
+      margin: 0 0 10px;
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #6b5748;
+      font-weight: 800;
+    }
+
+    .villager-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .villager-card {
+      width: 100%;
+      text-align: left;
+      background: rgba(248, 240, 223, 0.92);
+      border: 1px solid var(--line);
+      color: var(--ink);
+      display: grid;
+      grid-template-columns: 34px 1fr;
+      gap: 10px;
+      align-items: center;
+      padding: 9px;
+    }
+
+    .villager-card.active {
+      border-color: var(--rose);
+      box-shadow: inset 0 0 0 1px var(--rose);
+    }
+
+    .villager-swatch {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      border: 2px solid rgba(255, 250, 240, 0.9);
+      box-shadow: 0 3px 8px var(--shadow);
+    }
+
+    .villager-name {
+      font-weight: 800;
+      line-height: 1.2;
+    }
+
+    .villager-meta {
+      margin-top: 2px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.25;
+    }
+
+    .offline-note {
+      margin: 12px 0 0;
+      color: var(--danger);
+      font-size: 13px;
+      line-height: 1.35;
+    }
+
+    .chat-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 12px 14px 9px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .chat-title {
+      min-width: 0;
+    }
+
+    .chat-title strong {
+      display: block;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .chat-title span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .chat-log {
+      overflow: auto;
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .message {
+      max-width: 82%;
+      border-radius: 8px;
+      padding: 9px 11px;
+      line-height: 1.42;
+      font-size: 14px;
+      overflow-wrap: anywhere;
+      border: 1px solid transparent;
+    }
+
+    .message.player {
+      align-self: flex-end;
+      background: var(--rose);
+      color: var(--ivory);
+    }
+
+    .message.villager {
+      align-self: flex-start;
+      background: rgba(255, 250, 240, 0.96);
+      border-color: var(--line);
+    }
+
+    .message.system {
+      align-self: center;
+      max-width: 96%;
+      background: transparent;
+      color: var(--muted);
+      font-size: 12px;
+      text-align: center;
+      padding: 2px 6px;
+    }
+
+    .memory-cue {
+      display: none;
+      padding: 0 14px 8px;
+      color: #6f624f;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .memory-cue.visible {
+      display: block;
+    }
+
+    .composer {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      padding: 10px 14px 14px;
+      border-top: 1px solid var(--line);
+    }
+
+    .composer input {
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--ivory);
+      padding: 10px 11px;
+      color: var(--ink);
+      outline: none;
+    }
+
+    .composer input:focus {
+      border-color: var(--rose);
+      box-shadow: 0 0 0 2px rgba(201, 131, 139, 0.22);
+    }
+
+    .gift-row {
+      display: flex;
+      gap: 6px;
+      overflow-x: auto;
+      padding: 0 14px 12px;
+    }
+
+    .gift-row button {
+      flex: 0 0 auto;
+      background: var(--sage);
+      color: var(--ink);
+      padding: 7px 10px;
+      font-size: 12px;
+    }
+
+    .context-block {
+      border-top: 1px solid var(--line);
+      padding-top: 10px;
+      margin-top: 10px;
+    }
+
+    .context-block:first-of-type {
+      border-top: 0;
+      margin-top: 0;
+      padding-top: 0;
+    }
+
+    .context-block h3 {
+      margin: 0 0 6px;
+      font-size: 12px;
+      color: #6b5748;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .context-block p,
+    .context-block li {
+      margin: 0 0 6px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.42;
+      overflow-wrap: anywhere;
+    }
+
+    .context-block ul {
+      margin: 0;
+      padding-left: 17px;
+    }
+
+    .action-prompt {
+      position: fixed;
+      left: 50%;
+      bottom: 252px;
+      transform: translateX(-50%);
+      z-index: 5;
+      min-width: 260px;
+      max-width: calc(100vw - 32px);
+      padding: 9px 14px;
+      border-radius: 8px;
+      background: rgba(70, 61, 53, 0.88);
+      color: var(--ivory);
+      box-shadow: 0 10px 26px var(--shadow);
+      text-align: center;
+      font-size: 13px;
+      font-weight: 800;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.18s ease;
+    }
+
+    .action-prompt.visible {
+      opacity: 1;
+    }
+
+    .nearby-chip {
+      display: inline-block;
+      margin-top: 3px;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: rgba(95, 127, 93, 0.16);
+      color: var(--sage-dark);
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    .empty {
+      color: var(--muted);
+      font-style: italic;
+      font-size: 13px;
+    }
+
+    @media (max-width: 1040px) {
+      .context-panel {
+        display: none;
+      }
+
+      .chat-panel {
+        right: 14px;
+      }
+    }
+
+    @media (max-width: 760px) {
+      .topbar {
+        grid-template-columns: 1fr;
+        height: auto;
+        align-items: start;
+      }
+
+      .world-line,
+      .server-line {
+        justify-self: start;
+        text-align: left;
+      }
+
+      .villager-panel {
+        top: 118px;
+        width: 190px;
+      }
+
+      .chat-panel {
+        left: 14px;
+        right: 14px;
+        max-height: 42vh;
+      }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="village-canvas" aria-label="Heather's Hollow village view"></canvas>
+
+  <header class="panel topbar">
+    <div class="brand">
+      <h1>Heather's Hollow</h1>
+      <p id="subtitle">Loading the hollow</p>
+    </div>
+    <p class="world-line" id="world-line">Day 1 | morning | spring | clear</p>
+    <p class="server-line">
+      <span class="status-dot" id="status-dot"></span>
+      <span id="server-line">Server offline</span>
+    </p>
+  </header>
+
+  <aside class="panel villager-panel" aria-label="Villagers">
+    <h2 class="section-label">Villagers</h2>
+    <div class="villager-list" id="villager-list"></div>
+    <p class="offline-note" id="offline-note" hidden></p>
+  </aside>
+
+  <aside class="panel context-panel" aria-label="Villager context">
+    <h2 class="section-label">Context</h2>
+    <div id="context-content" class="empty">Select a villager.</div>
+  </aside>
+
+  <div class="action-prompt" id="interaction-prompt">Move near a villager</div>
+
+  <section class="panel chat-panel" aria-label="Conversation">
+    <div class="chat-head">
+      <div class="chat-title">
+        <strong id="chat-name">No villager selected</strong>
+        <span id="chat-meta">Conversation will appear here.</span>
+      </div>
+      <button type="button" id="refresh-context">Refresh</button>
+    </div>
+    <div class="chat-log" id="chat-log"></div>
+    <div class="memory-cue" id="memory-cue"></div>
+    <div class="gift-row" id="gift-row"></div>
+    <form class="composer" id="composer">
+      <input id="message-input" autocomplete="off" placeholder="Select a villager first">
+      <button id="send-button" type="submit">Send</button>
+    </form>
+  </section>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>

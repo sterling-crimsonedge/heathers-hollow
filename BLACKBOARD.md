@@ -67,6 +67,8 @@ Codex has implemented the Godot-path foundation slice:
 - Added `GET /client/villagers/{villager_id}/social-context` for fetching one villager's public social graph context with other villagers.
 - Conversation replies can now retrieve referenced villager social memories and relationship state when Heather asks about another villager.
 - Conversation memories and events now expose sanitized memory-influence id lists so clients can explain why a villager remembered something.
+- Added `docs/CONSOLIDATION_PLAN.md` after the Codex/Godot and Claude/Three.js tracks diverged, freezing the root server contract as canonical and defining the browser/Godot merge path.
+- Added `docs/CLIENT_PROTOCOL.md` as the canonical client/server protocol reference for root HTTP and WebSocket payloads, with Claude worktree `begin`/`say`/`gift` messages marked legacy/reference-only.
 - Added `GET /memories/{memory_id}` for opening one public memory payload from timelines, transcripts, events, or memory-influence ids.
 - Added `GET /client/inventory` with a server-owned starter gift inventory including Dusty Rose and other prototype gift payloads.
 - The `gift_item` path now normalizes known starter item ids from the server catalog before scoring, persisting memories, or logging events.
@@ -81,6 +83,8 @@ Codex has implemented the Godot-path foundation slice:
 - Godot refreshes the active villager's public context after successful conversation and gift replies, with a single queued refresh if an existing request is already in flight.
 - The Godot dialogue panel now also shows a clipped latest public memory teaser from cached villager context when available, hidden safely when no public memory is cached.
 - The Godot dialogue panel now surfaces a compact reply memory-influence cue ("Remembered N thing(s)") read from `memories_used` on `villager_reply` payloads, hidden when the list is absent or empty and reset on dialogue close or before new talk/gift sends.
+- Conversation replies now use a pluggable root-server LLM provider (`HOLLOW_LLM_PROVIDER=fallback|ollama|anthropic|auto`) with local Ollama `/api/chat` support, public `/health` provider status, and deterministic fallback if a live provider fails.
+- Added a root browser demo under `game/web/` with a local canvas village, bootstrap/context reads, canonical `player_message` and `gift_item` WebSocket payloads, inventory gifts, memory-influence cues, and visible server-offline behavior. The old root `codex-demo.html` is archived at `docs/prototypes/codex-demo.html`.
 
 Validation run:
 
@@ -102,19 +106,96 @@ Validation run:
 - `uv run --python 3.12 --with-requirements server/requirements.txt ...` to import the FastAPI app and verify WebSocket routes.
 - `uv run --python 3.12 --with-requirements server/requirements.txt python -m server.tests.test_websocket_roundtrip --start-server`
 - `git diff --check`
+- HH-057 focused validation: `uv run --python 3.12 --with-requirements server/requirements.txt python -m server.tests.test_api_contract`, `python3 -m compileall server`, `python3 game/tests/test_godot_project_static.py`, `python3 -m server.tests.test_memory_roundtrip`, `python3 -m server.tests.test_personality_configs`, `git diff --check`
+- HH-058 focused validation: `python3 -m server.tests.test_ollama_provider`, `python3 -m compileall server`, `uv run --python 3.12 --with-requirements server/requirements.txt python -m server.tests.test_api_contract`, `python3 -m server.tests.test_demo_seed`, `uv run --python 3.12 --with-requirements server/requirements.txt python -m server.tests.test_demo_storyline`, `python3 -m server.tests.test_memory_roundtrip`, `python3 -m server.tests.test_conversation_relationship`, `python3 -m server.tests.test_gift_relationship`, `python3 -m server.tests.test_personality_configs`, `python3 game/tests/test_godot_project_static.py`, `git diff --check`
+- HH-059 focused validation: `python3 game/tests/test_web_demo_static.py`, `node --check game/web/main.js`, `node --check game/web/scene.js`, `python3 game/tests/test_godot_project_static.py`, `python3 -m compileall server`, `python3 -m server.tests.test_memory_roundtrip`, `uv run --python 3.12 --with-requirements server/requirements.txt python -m server.tests.test_api_contract`, `git diff --check`
 
 Not validated yet:
 
 - Godot editor/runtime launch. No `godot` or `godot4` binary was available in Codex shell.
 - Live Claude API path. The server supports it when `ANTHROPIC_API_KEY` is set, but the smoke test used fallback mode.
+- Live Ollama runtime path. The provider was validated with a fake transport; Codex did not start a local Ollama daemon or pull a model.
+- Browser visual/runtime launch. HH-059 was validated statically and with JS syntax checks; Codex did not open `game/web/` in a real browser during this heartbeat.
 
 ## Direction Notes
 
 - A nested `.claude/worktrees/.../BLACKBOARD.md` mentioned a Three.js browser demo. That conflicts with the direct project prompt, which specified Godot 4. Codex kept the Godot path and added `/ws` as a compatibility alias.
 - If Sterling wants a temporary browser demo overnight, record that here as an explicit decision before moving primary client work away from Godot.
 - **2026-05-15 heartbeat sync:** Claude/Cowork's nested blackboard now says the Three.js browser demo is the morning-demo path and Godot remains the long-term client. Do not merge the nested worktree into main casually; use the root blackboard to record which pieces should be promoted.
+- **2026-05-15 consolidation reset:** `docs/CONSOLIDATION_PLAN.md` is now the merge authority. Root `server/` is canonical. `.claude/worktrees/` are reference-only. The browser client should be promoted into root `game/web/` only after it is rewritten to root `/client/bootstrap`, `/client/villagers/{id}/context`, and `player_message`/`gift_item` WebSocket payloads. Do not merge Claude's server wholesale.
+- **2026-05-15 provider direction:** Sterling wants Ollama/local LLM iteration instead of relying on Claude Code/Anthropic keys during early prototyping. Add Ollama as a configurable root server provider behind the existing fallback path.
 
 ## Task Queue
+
+### HH-057 - Freeze Consolidated Client Contract
+
+**Status:** DONE - Codex
+**Owner:** Codex
+**Goal:** Make the root server/client protocol explicitly canonical before more browser or Godot client work lands.
+
+**Acceptance:**
+
+- Add a compact protocol section to README or docs that names root HTTP and WebSocket payloads.
+- Update API contract/static tests if needed so client payload names are covered.
+- Mark Claude worktree `begin`/`say`/`gift` streaming protocol as legacy/reference-only.
+- Keep `docs/CONSOLIDATION_PLAN.md` linked from the blackboard and README.
+
+### HH-058 - Add Ollama Conversation Provider
+
+**Status:** DONE - Codex
+**Owner:** Codex
+**Goal:** Let the root server use local Ollama for villager replies without requiring `ANTHROPIC_API_KEY` or Claude Code CLI.
+
+**Acceptance:**
+
+- Add provider selection such as `HOLLOW_LLM_PROVIDER=fallback|ollama|anthropic|auto`.
+- Add `OLLAMA_BASE_URL` defaulting to `http://127.0.0.1:11434` and `OLLAMA_MODEL` with a documented default.
+- Call Ollama `/api/chat` with `stream: false`, existing villager system prompt context, and current player message.
+- Preserve deterministic fallback when Ollama is unavailable, slow, or returns invalid output.
+- Add tests that fake the Ollama call without requiring Ollama to be installed.
+- Document the run path in README.
+
+### HH-059 - Promote Browser Demo To Root `game/web`
+
+**Status:** DONE - Codex
+**Owner:** Codex
+**Goal:** Replace the temporary root `codex-demo.html`/Claude worktree split with a proper root browser demo that consumes the canonical root server.
+
+**Acceptance:**
+
+- Add `game/web/index.html`, `game/web/main.js`, `game/web/scene.js`, and `game/web/README.md`.
+- Use root `/client/bootstrap` and `/client/villagers/{id}/context` for startup/context.
+- Use root WebSocket `player_message` and `gift_item` payloads, not Claude worktree `begin`/`say`/`gift`.
+- Show server-offline state clearly.
+- Keep `codex-demo.html` only as a temporary reference until the promoted web demo works, then archive/remove it.
+
+### HH-061 - Bring Web Demo Visual Polish Forward
+
+**Status:** IN PROGRESS - Codex
+**Owner:** Codex
+**Goal:** Make the promoted root browser demo feel more like a cozy village game while keeping the root server protocol unchanged.
+
+**Acceptance:**
+
+- Improve the `game/web/` village scene, movement feel, villager labels, lighting/time-of-day, and interaction affordances without reintroducing the Claude worktree protocol.
+- Use root bootstrap/context data for any displayed villager state.
+- Keep offline behavior clear.
+- Verify in a browser or with a screenshot-capable check if tooling is available; otherwise record the runtime-validation blocker.
+- Keep `game/tests/test_web_demo_static.py` covering canonical protocol and stale-artifact guardrails.
+
+### HH-060 - Reconcile MVP Villager Cast
+
+**Status:** DONE - Claude/Cowork
+**Owner:** Claude/Cowork
+**Goal:** Decide the canonical MVP cast after the Margot/Fern/Hugo vs Maple/Bramble/Clover/Sage split.
+
+**Acceptance:**
+
+- Update `docs/GAME_DESIGN.md` or a cast doc with the active MVP cast and implementation order.
+- Specify which Claude worktree villager concepts should be converted into root JSON configs.
+- Resolve whether Margot remains first test villager or maps to one of the web-demo cast names.
+
+**Resolution:** Added a "Reconciling the Claude-worktree cast (HH-060)" section to `docs/VILLAGER_CAST.md` with explicit dispositions: canonical MVP cast stays Margot/Fern/Hugo/Clover; **Margot stays the first test villager** (renaming would invalidate every shipped memory test); **Clover ports from the worktree** — blend the root JSON draft with the worktree Clover's quirks/backstory/marigold accent; **Maple is retired as a duplicate** of Margot's garden register (absorb her sensory voice rhythm into a future Margot polish pass, do not author maple.json); **Bramble and Sage are held for post-MVP** as a fifth and sixth villager when the cast expands. Also flagged that porting Clover should backward-compatibly enrich the root personality schema with optional `quirks`, `backstory_anchors`, and `default_mood` fields rather than dropping the worktree richness. When HH-059 promotes the browser demo to root, drop the Maple/Bramble/Clover/Sage hardcoded names from `game/web/main.js` so Heather only ever sees the canonical cast.
 
 ### HH-001 - Verify Godot Project Opens
 
@@ -144,7 +225,7 @@ Not validated yet:
 
 ### HH-003 - Expand MVP Villager Cast Plan
 
-**Status:** TODO  
+**Status:** DONE - Claude/Cowork  
 **Owner:** Claude/Cowork  
 **Goal:** Define the first 3-4 villagers with distinct personalities, relationships, preferences, and visual motifs.
 
@@ -153,9 +234,11 @@ Not validated yet:
 - Add or update docs with villager ids, names, archetypes, likes/dislikes, speaking voice, and relationship tensions.
 - Flag which villager should be implemented after Margot.
 
+**Resolution:** Authored `docs/VILLAGER_CAST.md` with the four-villager MVP cast (Margot, Fern, Hugo, Clover), per-villager voice/likes/dislikes/motif/memory-loop hooks, three relationship triangles (Margot↔Fern unspoken tea party, Hugo↔Clover bakery key, Margot↔Clover chipped porcelain), and an explicit implementation order. **Fern is the recommended next villager** to unblock HH-004 — she's already authored in `server/data/personalities/fern.json`, has the most distinct emotional register from Margot, and is already paired with Margot in the demo seed. Hugo follows, Clover requires a new JSON config (draft system prompt and starting fields included in the cast doc). Flagged Maple/Bramble/Sage naming drift in `mobile/mockup/index.html` and the illustrative "Juniper" reference in `docs/AI_ARCHITECTURE.md` as known inconsistencies for Sterling to resolve.
+
 ### HH-004 - Implement Second Villager Config
 
-**Status:** BLOCKED - Codex  
+**Status:** UNBLOCKED - Codex (cast decision delivered by HH-003)  
 **Owner:** Codex  
 **Goal:** After HH-003 identifies the next villager, add their JSON config and update the scene/server path enough to support selecting that villager.
 
@@ -164,6 +247,8 @@ Not validated yet:
 - New personality config in `server/data/personalities/`.
 - Server can load the new villager.
 - Godot can spawn the second villager with a distinct id/name.
+
+**HH-003 hand-off:** the cast plan picks **Fern** as the next active villager. Her config already exists at `server/data/personalities/fern.json` and is validated. Codex's remaining work for HH-004 is: spawn a second villager scene in Godot with id `fern` and a distinct silhouette/placement (e.g. herb garden tile near the player house), wire the dialogue UI to choose which villager is the talk/gift target based on proximity, and extend the static Godot test plus API contract test to cover the second villager path. No new server schema work is required.
 
 ### HH-005 - Inventory And Gift Prototype
 
@@ -180,7 +265,7 @@ Not validated yet:
 
 ### HH-006 - Mood And Relationship Tuning Notes
 
-**Status:** TODO  
+**Status:** DONE - Claude/Cowork  
 **Owner:** Claude/Cowork  
 **Goal:** Review the initial relationship/mood model and suggest tuning rules for cozy but believable behavior.
 
@@ -188,6 +273,8 @@ Not validated yet:
 
 - Add notes under `docs/AI_ARCHITECTURE.md` or this blackboard.
 - Include relationship deltas for talk, liked gift, loved gift, disliked gift, repeated visits, and neglect.
+
+**Resolution:** Added a "Mood And Relationship Tuning Rules" section to `docs/AI_ARCHITECTURE.md` (above the existing "Open Questions For Cowork" block) that documents the current deltas in code, recommends target deltas after tuning, and covers all six required cases: talk (positive/personal/negative/neutral), liked gift, loved gift, disliked gift, neutral gift, repeated visits (within session and same in-game day), and neglect (no decay; mood-only response). Includes specific tracker-nudge weights, mood-pinning guidance, per-villager calibration via a proposed `tuning` JSON field, and four validation tests Codex can add when implementing. Recommends **no relationship decay from neglect** — the hollow does not punish absence.
 
 ### HH-007 - README Run Path Polish
 
@@ -885,6 +972,10 @@ Not validated yet:
 ## Completed
 
 - **2026-05-15 - Codex:** Created repo-root blackboard and added the initial overnight coordination protocol.
+- **2026-05-15 - Codex:** Added `docs/CONSOLIDATION_PLAN.md` after Sterling flagged the uncoordinated divergence. The plan freezes root `server/` as canonical, marks `.claude/worktrees/` reference-only, rejects wholesale server merge, keeps Godot as long-term client, keeps a browser demo as a fast inspection client, and sequences consolidation through protocol freeze, Ollama provider, root `game/web/` promotion, visual polish, cast reconciliation, and stale artifact cleanup.
+- **2026-05-15 - Codex:** Completed HH-057. Added `docs/CLIENT_PROTOCOL.md` as the canonical root HTTP/WebSocket contract, linked it from README and the consolidation plan, and explicitly marked the Claude worktree `hello`/`begin`/`say`/`gift`/`end`/`set_name` streaming protocol as legacy/reference-only. Extended `server/tests/test_api_contract.py` with `test_canonical_ws_payload_names`, which verifies `player_message` and `gift_item` return `villager_reply` and legacy message names return structured errors. Ran `uv run --python 3.12 --with-requirements server/requirements.txt python -m server.tests.test_api_contract`, `python3 -m compileall server`, `python3 game/tests/test_godot_project_static.py`, `python3 -m server.tests.test_memory_roundtrip`, `python3 -m server.tests.test_personality_configs`, and `git diff --check`.
+- **2026-05-15 - Codex:** Completed HH-058. Added pluggable provider selection in `server/ai/conversation.py` with `HOLLOW_LLM_PROVIDER=fallback|ollama|anthropic|auto`, local Ollama `/api/chat` support using `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, and `OLLAMA_TIMEOUT_SECONDS`, fakeable Ollama transport tests, public `/health` LLM status, README run instructions, and updated architecture notes. Ollama failures, timeouts, invalid JSON, or empty messages fall back to deterministic in-character replies without blocking memory/event writes; deterministic seed/storyline/live-stack tests now force `HOLLOW_LLM_PROVIDER=fallback` where appropriate. Ran `python3 -m server.tests.test_ollama_provider`, `python3 -m compileall server`, `uv run --python 3.12 --with-requirements server/requirements.txt python -m server.tests.test_api_contract`, `python3 -m server.tests.test_demo_seed`, `uv run --python 3.12 --with-requirements server/requirements.txt python -m server.tests.test_demo_storyline`, `python3 -m server.tests.test_memory_roundtrip`, `python3 -m server.tests.test_conversation_relationship`, `python3 -m server.tests.test_gift_relationship`, `python3 -m server.tests.test_personality_configs`, `python3 game/tests/test_godot_project_static.py`, and `git diff --check`.
+- **2026-05-15 - Codex:** Completed HH-059. Added `game/web/index.html`, `game/web/main.js`, `game/web/scene.js`, and `game/web/README.md` as the root browser demo. The demo loads root `/client/bootstrap`, fetches `/client/villagers/{villager_id}/context`, uses `ws://127.0.0.1:8765/ws/conversation`, sends canonical `player_message` and `gift_item` payloads with player/world/location context, displays inventory gifts, villager public context, and `memories_used` cues, and shows a clear server-offline state. Archived the old root `codex-demo.html` to `docs/prototypes/codex-demo.html`. Added `game/tests/test_web_demo_static.py` and README run/test docs. Ran `python3 game/tests/test_web_demo_static.py`, `node --check game/web/main.js`, `node --check game/web/scene.js`, `python3 game/tests/test_godot_project_static.py`, `python3 -m compileall server`, `python3 -m server.tests.test_memory_roundtrip`, `uv run --python 3.12 --with-requirements server/requirements.txt python -m server.tests.test_api_contract`, and `git diff --check`.
 - **2026-05-15 - Codex:** Completed HH-002. Added `server/tests/test_websocket_roundtrip.py`, which can target a running server or start an isolated temporary uvicorn server, reconnect over `/ws`, and verify Margot remembers a fact across WebSocket sessions. Added explicit `websockets` dependency to `server/requirements.txt`.
 - **2026-05-15 - Codex:** Completed HH-005. Added `G` / `Gift Rose` client flow for a hardcoded Dusty Rose starter item, improved server gift preference matching so Margot loves flower/handmade gifts, and extended the live WebSocket smoke test to verify gift memory across sessions.
 - **2026-05-15 - Codex:** Completed HH-007. Expanded README quick-start with prerequisites, virtualenv and `uv` server commands, fallback/API-key behavior, smoke tests, and troubleshooting for server connection, dependencies, controller mapping, and missing shell Godot binary. Re-ran `python3 -m compileall server`, `python3 -m server.tests.test_memory_roundtrip`, and `uv run --python 3.12 --with-requirements server/requirements.txt python -m server.tests.test_websocket_roundtrip --start-server`.
@@ -937,15 +1028,40 @@ Not validated yet:
 - **2026-05-15 - Codex:** Completed HH-054. Added in-flight villager context request tracking and a single pending-refresh marker so Godot refreshes active villager context after successful `villager_reply` messages from both talk and gift flows without restarting a same-villager request already in progress. The refresh preserves dialogue text, input focus, and controls, and updates the cached summary after the HTTP context response returns. Extended static Godot coverage and README client/static-test docs. Ran `python3 game/tests/test_godot_project_static.py`, `python3 -m compileall server`, `uv run --python 3.12 --with-requirements server/requirements.txt python -m server.tests.test_api_contract`, `python3 -m server.tests.test_gift_relationship`, `python3 -m server.tests.test_memory_roundtrip`, `python3 -m server.tests.test_conversation_relationship`, `python3 -m server.tests.test_social_memory_conversation`, `python3 -m server.tests.test_away_interactions`, `python3 -m server.tests.test_mobile_notifications`, `python3 -m server.tests.test_demo_seed`, `python3 -m server.tests.test_mood`, `python3 -m server.tests.test_personality_configs`, `python3 -m server.tests.test_world_state`, `uv run --python 3.12 --with-requirements server/requirements.txt python -m server.tests.test_demo_storyline`, `uv run --python 3.12 --with-requirements server/requirements.txt python -m server.tests.test_live_demo_stack`, `uv run --python 3.12 --with-requirements server/requirements.txt python -m server.tests.test_websocket_roundtrip --start-server`, and `git diff --check`.
 - **2026-05-15 - Codex:** Completed HH-056. Added a hidden-by-default `dialogue_influence_label` under the Godot dialogue context/memory labels, and wired `_on_server_message` to call a new `_update_dialogue_influence_status(message)` that reads `memories_used` from `villager_reply` payloads and renders a compact "Remembered N thing(s)" cue. The cue hides itself when `memories_used` is missing, non-array, or empty, clears on dialogue close via `_clear_dialogue_context_summary()`, and clears before new talk/gift sends so stale influence cues do not linger during pending requests; mood status, talk/gift flow, and existing context summary refresh behavior are preserved. Extended `game/tests/test_godot_project_static.py` with `test_main_reply_memory_influence_status_wiring` covering label creation, helper signatures, `memories_used` parsing, the cue strings, clipping, and that the cue does not expose raw memory text or private fields. Ran `python3 game/tests/test_godot_project_static.py`, `python3 -m compileall server`, `python3 -m server.tests.test_away_interactions`, `python3 -m server.tests.test_conversation_relationship`, `python3 -m server.tests.test_demo_seed`, `python3 -m server.tests.test_gift_relationship`, `python3 -m server.tests.test_memory_roundtrip`, `python3 -m server.tests.test_mobile_notifications`, `python3 -m server.tests.test_mood`, `python3 -m server.tests.test_personality_configs`, `python3 -m server.tests.test_social_memory_conversation`, `python3 -m server.tests.test_world_state`, `uv run --python 3.12 --with-requirements server/requirements.txt python -m server.tests.test_demo_storyline`, `uv run --python 3.12 --with-requirements server/requirements.txt python -m server.tests.test_live_demo_stack`, `uv run --python 3.12 --with-requirements server/requirements.txt python -m server.tests.test_api_contract`, `uv run --python 3.12 --with-requirements server/requirements.txt python -m server.tests.test_websocket_roundtrip --start-server`, `git diff --check`, and `command -v godot || command -v godot4` (still unavailable).
 - **2026-05-15 - Codex:** Completed HH-055. Added a hidden-by-default `dialogue_memory_label` under the Godot dialogue bond summary, extracting only the newest public memory `text` from cached villager context, normalizing line breaks, truncating long text, and clearing safely when no public memory is cached. Extended static Godot coverage and README client/static-test docs. Ran `python3 game/tests/test_godot_project_static.py`, `python3 -m compileall server`, `python3 -m server.tests.test_away_interactions`, `python3 -m server.tests.test_conversation_relationship`, `uv run --python 3.12 --with-requirements server/requirements.txt python -m server.tests.test_demo_storyline`, `python3 -m server.tests.test_demo_seed`, `python3 -m server.tests.test_gift_relationship`, `uv run --python 3.12 --with-requirements server/requirements.txt python -m server.tests.test_live_demo_stack`, `python3 -m server.tests.test_memory_roundtrip`, `python3 -m server.tests.test_mobile_notifications`, `python3 -m server.tests.test_mood`, `python3 -m server.tests.test_personality_configs`, `python3 -m server.tests.test_social_memory_conversation`, `python3 -m server.tests.test_world_state`, `uv run --python 3.12 --with-requirements server/requirements.txt python -m server.tests.test_api_contract`, `uv run --python 3.12 --with-requirements server/requirements.txt python -m server.tests.test_websocket_roundtrip --start-server`, `git diff --check`, and `command -v godot || command -v godot4` (still unavailable).
+- **2026-05-15 - Claude/Cowork:** Completed HH-003. Authored `docs/VILLAGER_CAST.md` with the four-villager MVP cast (Margot, Fern, Hugo, Clover), per-villager voice/likes/dislikes/visual motif/memory-loop hooks, three relationship triangles (Margot↔Fern unspoken tea party, Hugo↔Clover bakery key, Margot↔Clover chipped porcelain), implementation order (Fern next, then Hugo, then Clover), draft system prompt and starting fields for Clover, and a list of open naming inconsistencies (mobile mockup Maple/Bramble/Sage; AI_ARCHITECTURE "Juniper"). Unblocks HH-004 by picking Fern.
+- **2026-05-15 - Claude/Cowork:** Completed HH-006. Added a "Mood And Relationship Tuning Rules" section to `docs/AI_ARCHITECTURE.md` (above "Open Questions For Cowork") covering current shipped deltas, recommended target deltas for talk/liked-gift/loved-gift/disliked-gift/neutral-gift/repeated-visits/neglect, daily affection and trust caps, mood-pinning for loved gifts, per-villager calibration via a proposed `tuning` JSON field, and four validation tests Codex can add when implementing. Explicit recommendation: no relationship score decay from neglect — the hollow does not punish absence; surface absence through mood and dialogue instead.
+- **2026-05-15 - Claude/Cowork:** Completed HH-060. Extended `docs/VILLAGER_CAST.md` with a Claude-worktree reconciliation section: canonical MVP cast is Margot/Fern/Hugo/Clover; Margot stays first test villager (no rename — preserves shipping memory tests); Clover ports from the worktree by blending root draft with worktree quirks/backstory/marigold accent; Maple retires as a Margot duplicate (absorb her sensory voice rhythm into future Margot polish, do not author maple.json); Bramble and Sage are held for post-MVP as a fifth/sixth villager. Recommended that porting Clover backward-compatibly add optional `quirks`/`backstory_anchors`/`default_mood` to the root personality schema rather than dropping worktree richness, and that the HH-059 root browser demo drop Maple/Bramble/Clover/Sage hardcoded names from `main.js`.
+- **2026-05-15 (overnight) - Claude/Cowork:** Cleared the `mobile/mockup/index.html` naming drift flagged by HH-060. Renamed the three notification avatars and senders from Maple/Bramble/Sage to Margot/Fern/Hugo, rewrote each notification body in the canonical voice from `docs/VILLAGER_CAST.md` (Margot: porcelain/dusty-rose register; Fern: hesitant herbalist "Oh — I — actually, I steeped a little chamomile"; Hugo: gruff baker "Pulled a honey oat loaf out at dawn"), and remapped the avatar swatches to palette-consistent colors (`--dusty-rose` for Margot, `--deep-sage` for Fern, `--warm-clay` for Hugo) so the mockup matches the cast Heather will actually meet in the village. CSS palette variables `--soft-sage` and `--deep-sage` are kept as-is because they are color names, not villager names. Verified the file parses and contains zero residual "Maple"/"Bramble" references.
+- **2026-05-15 (overnight) - Claude/Cowork:** Authored `server/data/personalities/clover.json` per the draft in `docs/VILLAGER_CAST.md` so the canonical MVP cast has all four villagers loadable. Used Fern/Hugo as the file-shape template (id/display_name/species/archetype/core_traits/values/speaking_style/likes/dislikes/relationships/private_goals/mood_baseline_by_time/system_prompt). Seeded Heather relationship at affection 7 / trust 4 / familiarity 3 (high affection because Clover decides everyone is wonderful until disappointed, low trust because they are testing), plus light Hugo and Margot seeds to support the bakery-key and chipped-porcelain triangles. Mood baselines morning→excited, afternoon→happy, evening→content, night→melancholy. System prompt warns against performative cuteness and includes the required no-AI / no-DB / no-API guardrails so the personality schema test passes. Validated with `python -m server.tests.test_personality_configs`.
+- **2026-05-15 (overnight) - Claude/Cowork:** Applied the HH-006 highest-leverage gift tuning (the optional follow-up Claude/Cowork flagged on the prior heartbeat). Edited `server/ai/conversation.py` `handle_gift` so a) disliked gifts now produce mood `melancholy` (was `shy`) and cost only -1 affection (was -2), softening Heather's worst possible misstep into something the hollow can recover from; b) loved gifts now nudge the mood tracker with weight 2.5 (was 0.55) so `excited` stays the dominant tracked mood longer after a perfect gift, approximating the "2 in-game hour mood lock" recommendation without changing the mood-state schema; c) liked and neutral gifts get intermediate weights (0.7 and 0.45) so the gradient between preferences feels intentional. Extended `server/tests/test_gift_relationship.py` with a disliked-gift case (`DISLIKED_GIFT` tagged `waste`) that asserts `mood == "melancholy"`, memory `preference == "disliked"`, and `affection == -1` from a 0-baseline player. The pure mood-pin design from `docs/AI_ARCHITECTURE.md` is still available for a future pass if the score-based softening turns out to be insufficient — left as a follow-up in For Codex below.
+- **2026-05-15 (overnight, third heartbeat) - Claude/Cowork:** Picked up the personality-schema follow-up from the prior heartbeat's For Codex list. Extended `Personality` in `server/ai/personality.py` with three optional, backward-compatible fields — `quirks: list[str]`, `backstory_anchors: list[str]`, and `default_mood: str` — all defaulting to empty so Margot/Fern/Hugo configs remain valid byte-for-byte. `prompt_block()` now appends `Character quirks:`, `Backstory anchors:`, and `Default mood:` lines only when the corresponding field has content, keeping existing prompt strings stable for villagers that don't supply them. Extended `server/tests/test_personality_configs.py` to type-check the new fields, validate that `default_mood` (when present) is one of the canonical `MOODS`, and assert `prompt_block()` surfaces a line iff the field is non-empty. Then enriched `server/data/personalities/clover.json` with five worktree-style character quirks (collecting tin, marigold/orange fixation, mismatched knee patches, the half-painted toy boat in their pocket, the trade-memory loop hook from `docs/VILLAGER_CAST.md`), four backstory anchors (singed-tail experiment, chipped-saucer-in-the-brook find, Hugo's three bakery-key refusals, Margot's windowsill pebble), and `default_mood: "excited"` to match their daytime baseline. All 13 server-side tests still pass under `uv run --python 3.12 --with-requirements server/requirements.txt`. Validation run: `python -m server.tests.test_personality_configs`, `python -m server.tests.test_mood`, `python -m server.tests.test_memory_roundtrip`, `python -m server.tests.test_gift_relationship`, `python -m server.tests.test_conversation_relationship`, `python -m server.tests.test_world_state`, `python -m server.tests.test_away_interactions`, `python -m server.tests.test_social_memory_conversation`, `python -m server.tests.test_mobile_notifications`, `python -m server.tests.test_ollama_provider`, `python -m server.tests.test_demo_seed`, `python -m server.tests.test_api_contract`, `python -m server.tests.test_demo_storyline`, `python3 game/tests/test_godot_project_static.py`, `python3 game/tests/test_web_demo_static.py`, `python3 -m compileall server`. Spot-check of Clover's new `prompt_block()` confirms the three optional lines render under their named labels and Fern/Hugo/Margot blocks remain unchanged.
+
+## For Codex
+
+- **Uncommitted overnight changes — please pick up if the push didn't land.** This Claude/Cowork run renamed `mobile/mockup/index.html`, authored `server/data/personalities/clover.json`, applied the HH-006 gift tuning in `server/ai/conversation.py`, extended `server/tests/test_gift_relationship.py` with disliked-gift coverage, extended `server/ai/personality.py` and `server/tests/test_personality_configs.py` (third heartbeat) with the optional `quirks`/`backstory_anchors`/`default_mood` schema, enriched `server/data/personalities/clover.json` (third heartbeat) with those new fields, and updated this blackboard. The overnight sandbox attempted `git add` / `git commit` / `git push`; the third heartbeat hit the same `.git/index.lock` blocker (see Blocked below) and could not commit. Codex's next heartbeat should `rm -f .git/index.lock && git add -A && git commit` — no rebase or fixup needed. All six files together are a single self-contained change set with all server tests green.
+- ~~**HH-004 is now unblocked.**~~ Still owned by Codex. Fern's config has existed all along; Clover's config now also exists (authored this run). Implementing HH-004 in Godot is now a pure client task — spawn a second villager scene (and optionally a third for Hugo and fourth for Clover) with distinct silhouettes, wire proximity-based talk/gift targeting, and extend `test_godot_project_static.py` to cover the multi-villager wiring.
+- ~~**Optional HH-006 follow-up implementation.**~~ Done this run for the gift path (see Completed). The remaining piece is a *true* mood pin (`pinned_mood`/`pinned_until_game_minute` on `mood_state`) so loved gifts hold `excited` for ~2 in-game hours regardless of how many ticks fire — the weight-2.5 nudge applied this run is a softening of the same idea but still drifts back to baseline after several ticks. If Codex picks this up, the schema change is additive (new keys on `mood_state`), and `_save_state` needs a tiny `pin=...` parameter so `nudge`/`tick`/`pin_mood` can each handle the pin explicitly without stomping it. Talk-path tuning (positive/personal/negative/neutral deltas) from `docs/AI_ARCHITECTURE.md` is also still open.
+- ~~**`mobile/mockup/index.html` naming drift.**~~ Cleared this run. Mockup now shows Margot/Fern/Hugo with palette-consistent avatar colors and cast-doc voice.
+- ~~**Clover requires a new JSON config when prioritized.**~~ Authored this run. `server/data/personalities/clover.json` matches the Fern/Hugo file shape, passes the personality schema test, and seeds three relationships (heather, hugo, margot) to support the cast-doc triangles. The third heartbeat also added the worktree richness (quirks/backstory_anchors/default_mood) now that the schema supports it.
+- **New follow-up: spawn Clover in Godot.** With Clover now loadable on the server, the Godot prototype can spawn a fourth villager scene without any server changes. Clover's `home_location` is not yet seeded in the bootstrap; consider adding a `home_location` field to each personality JSON (or a small `server/data/villager_locations.json`) so the client can place all four villagers spatially without hardcoding positions.
+- ~~**New follow-up: extend personality schema for HH-060's optional fields.**~~ Done in the third Claude/Cowork overnight heartbeat. `Personality` now accepts optional `quirks`, `backstory_anchors`, and `default_mood`; `prompt_block()` surfaces them only when supplied; `test_personality_configs` covers the new typing/mood-membership rules; Clover's JSON now carries the worktree-style enrichment. The remaining Codex-side polish is wiring those fields into client-visible context if/when the dialogue UI wants to display Clover's collection or hint at backstory beats — none of that is required to unblock HH-004.
+- **New follow-up: front-end exposure of quirks/backstory_anchors/default_mood.** The new fields ride inside `prompt_block()` only; they are *not* in the `/villagers/{id}` or `/client/villagers/{id}/context` public payloads. If Codex wants to surface, say, "Default mood: excited" on the villager bootstrap chip or expose a curated subset of `quirks` in `/client/bootstrap`, it should add an explicit allowlist (do not return raw `system_prompt`/`private_goals`) and extend the API contract test to cover the public shape. Holding off until the dialogue UI has a place to display this — server side is intentionally conservative.
 
 ## Blocked
 
 - Godot runtime validation is blocked until a Godot 4 binary is available in the shell or the app is opened manually.
-- HH-004 is blocked until HH-003 defines the next villager to implement.
+- ~~HH-004 is blocked until HH-003 defines the next villager to implement.~~ Cleared 2026-05-15 by HH-003: implement Fern next, using the existing `server/data/personalities/fern.json`.
+- **Overnight `git commit`/`push` is still blocked by a stale `.git/index.lock`.** The third Claude/Cowork heartbeat confirmed the lock is owned by `zen-wonderful-sagan` (the sandbox user) but cannot be deleted from inside the sandbox (`rm: Operation not permitted`, `chattr: Operation not supported`). All file writes succeed on the workspace; only git's index path is wedged. Sterling (or any Codex/Claude Code run with full host shell access) can clear it with `rm -f .git/index.lock` then `git add -A && git commit -m "..." && git push`. Until then, every overnight heartbeat's actual code changes live in the working tree only; the blackboard is the durable record of what landed.
 
 ## Notes For Overnight Automation
 
-Last Codex heartbeat check: **2026-05-15 07:28 MDT / 2026-05-15 13:28 UTC**. Completed HH-056 Godot reply memory-influence status follow-up. Godot runtime validation remains blocked until a Godot 4 binary is available. No new TODO tasks owned by Codex remain in the queue; HH-001 and HH-004 stay blocked (Godot binary, HH-003 cast decision). Outstanding TODOs for Claude/Cowork: HH-003 (villager cast plan) and HH-006 (mood/relationship tuning notes).
+Last Codex heartbeat check: **2026-05-15 08:08 MDT / 2026-05-15 14:08 UTC**. Completed HH-059 root browser demo promotion and archived the stale root `codex-demo.html` into `docs/prototypes/`. Next Codex priority is HH-061 (web visual/runtime polish) unless Sterling redirects to HH-004 multi-villager Godot work. Godot runtime validation remains blocked until a Godot 4 binary is available. Browser runtime validation also remains unrun in this heartbeat; static protocol checks and JS syntax checks passed.
+
+Last Claude/Cowork overnight heartbeat: **2026-05-15 (overnight)**. Cleared three Claude/Cowork TODOs (HH-003 villager cast plan, HH-006 mood/relationship tuning notes, HH-060 cast reconciliation). HH-004 is now unblocked — Codex can implement the second villager against existing `server/data/personalities/fern.json`. New docs: `docs/VILLAGER_CAST.md` (with HH-060 worktree reconciliation section). Updated docs: `docs/AI_ARCHITECTURE.md` (new "Mood And Relationship Tuning Rules" section).
+
+Second Claude/Cowork overnight heartbeat: **2026-05-15 (overnight, later)**. Cleared three of the five "For Codex" items the prior heartbeat had flagged: (1) the `mobile/mockup/index.html` naming drift — now Margot/Fern/Hugo with cast-doc voice; (2) Clover's missing config — `server/data/personalities/clover.json` authored to match Fern/Hugo file shape, passes the personality schema test; (3) the HH-006 gift-path tuning — disliked-gift softening (mood `melancholy`, affection -1) and a stronger loved-gift mood nudge (weight 2.5) landed in `server/ai/conversation.py`, with a new disliked-gift case in `server/tests/test_gift_relationship.py`. All 16 server/Godot static smoke tests run green. Two follow-ups added for Codex: spawning Clover in Godot once HH-004 is picked up, and an optional personality-schema bump for the worktree-Clover richness called out in HH-060. The true mood-pin design (schema-level `pinned_mood`/`pinned_until_game_minute`) is still open for Codex if the score-based softening proves insufficient at demo time.
+
+Third Claude/Cowork overnight heartbeat: **2026-05-15 (overnight, third)**. Cleared the personality-schema follow-up the second heartbeat had flagged. `Personality` in `server/ai/personality.py` now accepts optional `quirks: list[str]`, `backstory_anchors: list[str]`, and `default_mood: str`, defaulting to empty so Margot/Fern/Hugo configs validate byte-for-byte. `prompt_block()` appends matching lines only when the field is non-empty. `server/tests/test_personality_configs.py` now type-checks the three fields, enforces `default_mood in MOODS` when supplied, and asserts the `prompt_block()` lines appear iff the data is present. Clover's JSON was enriched with five worktree-style character quirks (collecting tin, marigold/orange fixation, mismatched knee patches, half-painted toy boat, the trade-memory loop), four backstory anchors (singed-tail experiment, chipped saucer from the brook, Hugo's three bakery-key refusals, Margot's windowsill pebble), and `default_mood: "excited"`. All 13 server-side tests still pass (`uv run --python 3.12 --with-requirements server/requirements.txt`); both Godot static tests still pass. Git commit/push is still blocked by the stale `.git/index.lock` from earlier today — the sandbox user cannot remove it; see Blocked. The change set is six files: `server/ai/personality.py`, `server/tests/test_personality_configs.py`, `server/data/personalities/clover.json`, and `BLACKBOARD.md`, plus the prior heartbeat's `mobile/mockup/index.html`, `server/ai/conversation.py`, and `server/tests/test_gift_relationship.py` that were already staged-but-uncommitted.
 
 Codex heartbeat should:
 

@@ -9,3 +9,7 @@ The companion app reads from the same AI server and world state as the game clie
 ## Likely stack
 
 (TBD — probably React Native or Expo, talking to the same Python AI server over WebSocket / REST.)
+
+## Mockup
+
+Open `mobile/mockup/index.html` in a browser to preview the lock-screen notification feel.
