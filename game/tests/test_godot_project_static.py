@@ -281,6 +281,74 @@ def test_main_dialogue_context_summary_wiring() -> None:
     assert "system_prompt" not in main_script
 
 
+def test_main_multi_villager_spawn_from_bootstrap_wiring() -> None:
+    """HH-004: bootstrap-driven multi-villager spawn in Godot.
+
+    The Godot prototype used to hardcode a single Margot spawn. After HH-004
+    it must loop over the cached `/client/bootstrap` `villagers` array,
+    spawn one `villager.tscn` per entry, and place each via a
+    `home_location` -> `Vector3` lookup that covers every canonical MVP
+    location (`town_square`, `garden`, `shop`, `brook`). Runtime validation
+    remains blocked without a `godot4` binary, so these static checks are
+    the durable proof that the wiring is in place.
+    """
+    main_script = _read(GAME_ROOT / "scripts/main.gd")
+
+    # Helper + spawn loop exist and are referenced from the bootstrap path.
+    assert "func _spawn_villagers_from_bootstrap() -> void" in main_script, (
+        "HH-004 expects a `_spawn_villagers_from_bootstrap` function that "
+        "iterates the cached bootstrap villagers array."
+    )
+    assert "func _spawn_villager(" in main_script, (
+        "HH-004 expects a `_spawn_villager` helper to instantiate "
+        "villager.tscn for each cast member."
+    )
+    assert "_spawn_villagers_from_bootstrap()" in main_script, (
+        "Bootstrap completion should call `_spawn_villagers_from_bootstrap`."
+    )
+
+    # Every canonical MVP home_location is mapped to a placement Vector3.
+    assert "const HOME_LOCATION_POSITIONS" in main_script
+    for location in ("town_square", "garden", "shop", "brook"):
+        assert (
+            f'"{location}"' in main_script
+        ), f"HOME_LOCATION_POSITIONS must cover {location!r}."
+    assert "FALLBACK_VILLAGER_POSITIONS" in main_script, (
+        "Spawn loop should have a fallback Vector3 set for any villager "
+        "whose home_location is not in HOME_LOCATION_POSITIONS."
+    )
+
+    # Bootstrap payload fields the spawn loop reads.
+    assert 'villager_data.get("id", "")' in main_script
+    assert 'villager_data.get("display_name"' in main_script
+    assert 'villager_data.get("home_location"' in main_script
+
+    # The spawn loop registers each villager in villagers_by_id and respects
+    # already-spawned villagers (offline-fallback Margot) instead of
+    # double-instantiating them.
+    assert "villagers_by_id[villager.villager_id] = villager" in main_script
+    assert "if villagers_by_id.has(villager_id):" in main_script
+    assert "apply_public_profile(villager_data)" in main_script
+
+    # The offline-fallback Margot is still spawned in _ready() so the
+    # prototype is usable without a live server.
+    assert "_spawn_test_villager()" in main_script
+    # ...but the spawn function should now go through the shared helper,
+    # not a hand-rolled instantiate path that bypasses villagers_by_id.
+    spawn_helper_body = main_script.split("func _spawn_villager(", 1)[1]
+    spawn_helper_body = spawn_helper_body.split("\nfunc ", 1)[0]
+    assert "VILLAGER_SCENE.instantiate()" in spawn_helper_body, (
+        "_spawn_villager helper should instantiate VILLAGER_SCENE."
+    )
+
+    # Per-villager facing tweaks for each canonical cast member.
+    assert "const HOME_LOCATION_FACING_DEGREES" in main_script
+    for villager_id in ("margot", "fern", "hugo", "clover"):
+        assert (
+            f'"{villager_id}"' in main_script
+        ), f"HH-004 spawn map should reference {villager_id!r}."
+
+
 def test_main_reply_memory_influence_status_wiring() -> None:
     main_script = _read(GAME_ROOT / "scripts/main.gd")
 
@@ -327,6 +395,7 @@ def main() -> None:
     test_main_villager_context_request_wiring()
     test_main_context_refresh_after_interactions_wiring()
     test_main_dialogue_context_summary_wiring()
+    test_main_multi_villager_spawn_from_bootstrap_wiring()
     test_main_reply_memory_influence_status_wiring()
     print("✓ Godot project static checks passed")
 

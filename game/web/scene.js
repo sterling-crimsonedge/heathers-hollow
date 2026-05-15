@@ -234,6 +234,10 @@ class VillageScene {
     this.drawPath(ctx, -7, 3, 0, 0);
     this.drawPath(ctx, 7, -1, 0, 0);
 
+    // Brook is drawn before the village structures so the bank flowers and
+    // ripples sit under any villager standing on top of Clover's home tile.
+    this.drawBrook(ctx, 4, 5, time);
+
     this.drawGarden(ctx, -7, 3);
     this.drawHouse(ctx, -1, 8, "#fffaf0", "#c9838b", "Home");
     this.drawHouse(ctx, 7, -1, "#f7ead0", "#b7785f", "Shop");
@@ -369,6 +373,82 @@ class VillageScene {
     ctx.beginPath();
     ctx.arc(Math.sin(time) * 5, -10, 9, Math.PI * 0.15, Math.PI * 0.85);
     ctx.stroke();
+    ctx.restore();
+  }
+
+  drawBrook(ctx, x, z, time) {
+    // Clover's home — a soft blue meander between Margot's plaza and Hugo's
+    // shop with marigold sprites on the bank. Matches the (4, 5) LOCATION
+    // point so Heather can read the cast-doc chipped-saucer beat at a glance.
+    const center = this.toScreen(x, z);
+    ctx.save();
+    ctx.translate(center.x, center.y);
+
+    // Wet earth bank — a darker ellipse that grounds the water and gives
+    // the marigolds something to sit on without floating mid-grass.
+    ctx.fillStyle = "rgba(112, 92, 70, 0.32)";
+    ctx.beginPath();
+    ctx.ellipse(0, 4, 78, 30, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Brook body — soft S-curve. Two stroked paths in different blues so the
+    // brook reads as flowing water and not a flat puddle.
+    ctx.strokeStyle = "#88a9bf";
+    ctx.lineCap = "round";
+    ctx.lineWidth = 16;
+    ctx.beginPath();
+    ctx.moveTo(-58, 14);
+    ctx.bezierCurveTo(-22, -4, -4, 18, 28, -2);
+    ctx.bezierCurveTo(44, -10, 56, 6, 70, -6);
+    ctx.stroke();
+
+    ctx.strokeStyle = "rgba(255, 250, 240, 0.55)";
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(-54, 12);
+    ctx.bezierCurveTo(-20, -2, -2, 16, 26, -2);
+    ctx.bezierCurveTo(42, -10, 54, 4, 66, -6);
+    ctx.stroke();
+
+    // A handful of moving ripples so the brook is visibly alive when the
+    // demo loop is running. Anchored to `time` like the fountain ripple.
+    ctx.strokeStyle = "rgba(255, 250, 240, 0.45)";
+    ctx.lineWidth = 1.4;
+    const rippleOffset = Math.sin(time * 1.7) * 4;
+    for (const [rx, ry, radius] of [
+      [-32 + rippleOffset, 8, 7],
+      [4 + rippleOffset * 0.6, 4, 6],
+      [40 - rippleOffset * 0.4, -2, 7],
+    ]) {
+      ctx.beginPath();
+      ctx.arc(rx, ry, radius, Math.PI * 0.15, Math.PI * 0.85);
+      ctx.stroke();
+    }
+
+    // Marigold cluster on each bank — the cast doc anchors Clover to a
+    // marigold/orange palette, so the brook should echo it. Soft green
+    // tufts underneath ground each cluster.
+    for (const [bx, by] of [
+      [-46, -10],
+      [-30, 18],
+      [14, -14],
+      [34, 16],
+      [58, -10],
+    ]) {
+      ctx.fillStyle = "rgba(95, 127, 93, 0.55)";
+      ctx.beginPath();
+      ctx.ellipse(bx, by + 3, 9, 3, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#f0a35a";
+      ctx.beginPath();
+      ctx.arc(bx, by, 3.4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#ffe8b0";
+      ctx.beginPath();
+      ctx.arc(bx, by, 1.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
     ctx.restore();
   }
 

@@ -12,6 +12,40 @@ const FALLBACK_STARTER_GIFT := {
 	"display_name": "Dusty Rose",
 }
 
+# Approximate world-space anchors for each public `home_location` keyword the
+# root server publishes via `/client/bootstrap`. Picked to roughly mirror the
+# `game/web/scene.js` `LOCATION_POINTS` layout while staying inside the
+# generated Godot village footprint:
+#   - `town_square`: Margot's existing plaza spot near the central fountain.
+#   - `garden`: edge of the cottage garden plots southwest of the plaza.
+#   - `shop`: just in front of the shop cottage to the east.
+#   - `brook`: between the plaza and shop until a real `_create_brook()`
+#     landmark exists in the Godot scene, mirroring the web demo's (4, 5).
+# Villagers without a known home_location fall through to FALLBACK_VILLAGER_POSITIONS.
+const HOME_LOCATION_POSITIONS := {
+	"town_square": Vector3(2.5, 0, 0.7),
+	"garden": Vector3(-8.5, 0, -6.5),
+	"shop": Vector3(9.5, 0, -2.0),
+	"brook": Vector3(4.0, 0, 5.0),
+	"player_house": Vector3(-9.5, 0, 4.0),
+}
+const FALLBACK_VILLAGER_POSITIONS := [
+	Vector3(2.5, 0, 0.7),
+	Vector3(-1.5, 0, -1.2),
+	Vector3(1.8, 0, 2.6),
+	Vector3(-3.4, 0, 0.4),
+]
+# Per-villager facing tweaks so each cast member angles toward the plaza
+# instead of staring along world-Z. Keyed by villager_id; villagers without
+# an entry use a neutral facing of -35° (the original Margot heading).
+const HOME_LOCATION_FACING_DEGREES := {
+	"margot": -35.0,
+	"fern": 35.0,
+	"hugo": -120.0,
+	"clover": 200.0,
+}
+const DEFAULT_VILLAGER_FACING_DEGREES := -35.0
+
 @onready var conversation_client = $ConversationClient
 
 var bootstrap_request: HTTPRequest
@@ -99,14 +133,91 @@ func _spawn_player() -> void:
 	player.nearby_villager_changed.connect(_on_nearby_villager_changed)
 
 func _spawn_test_villager() -> void:
+	# Offline-fallback Margot — guarantees at least one talkable villager when
+	# `/client/bootstrap` is unreachable. The full cast is spawned in
+	# `_spawn_villagers_from_bootstrap()` once the server replies and may
+	# upgrade this Margot in place via `apply_public_profile()`.
+	_spawn_villager(
+		"margot",
+		"Margot",
+		"town_square",
+		HOME_LOCATION_POSITIONS["town_square"],
+		HOME_LOCATION_FACING_DEGREES.get("margot", DEFAULT_VILLAGER_FACING_DEGREES)
+	)
+
+func _spawn_villager(
+	villager_id: String,
+	display_name: String,
+	home_location: String,
+	position: Vector3,
+	facing_degrees: float
+) -> Node:
+	if villagers_by_id.has(villager_id):
+		return villagers_by_id[villager_id]
+
 	var villager = VILLAGER_SCENE.instantiate()
-	villager.villager_id = "margot"
-	villager.display_name = "Margot"
-	villager.home_location = "town_square"
-	villager.global_position = Vector3(2.5, 0, 0.7)
-	villager.rotation_degrees.y = -35
+	villager.villager_id = villager_id
+	villager.display_name = display_name
+	villager.home_location = home_location
+	villager.global_position = position
+	villager.rotation_degrees.y = facing_degrees
 	add_child(villager)
 	villagers_by_id[villager.villager_id] = villager
+	return villager
+
+func _spawn_villagers_from_bootstrap() -> void:
+	# Iterate the cached `/client/bootstrap` villagers payload and spawn one
+	# `villager.tscn` per entry, placing each via HOME_LOCATION_POSITIONS so
+	# the root server's data-driven `home_location` field drives the scene.
+	# Villagers that already exist (typically the offline-fallback Margot) get
+	# their public profile re-applied via `apply_public_profile()` instead of
+	# being re-instantiated, which keeps Heather's nearby-villager tracking
+	# stable across bootstrap completion.
+	if bootstrap_villagers == null or typeof(bootstrap_villagers) != TYPE_ARRAY:
+		return
+	if bootstrap_villagers.is_empty():
+		return
+
+	var fallback_index := 0
+	for villager_data in bootstrap_villagers:
+		if typeof(villager_data) != TYPE_DICTIONARY:
+			continue
+
+		var villager_id := str(villager_data.get("id", "")).strip_edges()
+		if villager_id.is_empty():
+			continue
+
+		var display_name := str(villager_data.get("display_name", villager_id))
+		var home_location := str(villager_data.get("home_location", "town_square"))
+		if home_location.is_empty():
+			home_location = "town_square"
+
+		var position: Vector3
+		if HOME_LOCATION_POSITIONS.has(home_location):
+			position = HOME_LOCATION_POSITIONS[home_location]
+		else:
+			position = FALLBACK_VILLAGER_POSITIONS[
+				fallback_index % FALLBACK_VILLAGER_POSITIONS.size()
+			]
+			fallback_index += 1
+
+		var facing := float(HOME_LOCATION_FACING_DEGREES.get(
+			villager_id, DEFAULT_VILLAGER_FACING_DEGREES
+		))
+
+		if villagers_by_id.has(villager_id):
+			var existing = villagers_by_id[villager_id]
+			existing.global_position = position
+			existing.rotation_degrees.y = facing
+			existing.apply_public_profile(villager_data)
+		else:
+			_spawn_villager(
+				villager_id,
+				display_name,
+				home_location,
+				position,
+				facing
+			)
 
 func _build_ui() -> void:
 	var canvas := CanvasLayer.new()
@@ -233,7 +344,7 @@ func _build_ui() -> void:
 	stack.add_child(input_row)
 
 	dialogue_input = LineEdit.new()
-	dialogue_input.placeholder_text = "Say something to Margot..."
+	dialogue_input.placeholder_text = "Say something to the villager..."
 	dialogue_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	dialogue_input.text_submitted.connect(_on_dialogue_submitted)
 	input_row.add_child(dialogue_input)
@@ -245,7 +356,7 @@ func _build_ui() -> void:
 
 	gift_button = Button.new()
 	gift_button.text = "Gift Rose"
-	gift_button.tooltip_text = "Give Margot a Dusty Rose from the starter inventory."
+	gift_button.tooltip_text = "Give the nearby villager a Dusty Rose from the starter inventory."
 	gift_button.pressed.connect(_on_gift_pressed)
 	input_row.add_child(gift_button)
 
@@ -607,8 +718,11 @@ func _apply_bootstrap_villagers(villagers: Array) -> void:
 			continue
 
 		bootstrap_villagers_by_id[villager_id] = villager_data.duplicate(true)
-		if villagers_by_id.has(villager_id):
-			villagers_by_id[villager_id].apply_public_profile(villager_data)
+
+	# Spawn the rest of the cast (Fern/Hugo/Clover) from the bootstrap payload
+	# and upgrade any already-spawned villagers (typically the offline-fallback
+	# Margot) with their server-side public profile + home_location anchor.
+	_spawn_villagers_from_bootstrap()
 
 	if active_villager != null and dialogue_panel != null and dialogue_panel.visible:
 		dialogue_name.text = active_villager.display_name
@@ -623,7 +737,7 @@ func _apply_bootstrap_inventory(inventory: Dictionary) -> void:
 		if typeof(item) == TYPE_DICTIONARY and item.get("item_id", "") == STARTER_GIFT_ID:
 			starter_gift = item.duplicate(true)
 			if gift_button != null:
-				gift_button.tooltip_text = "Give Margot a %s from the starter inventory." % _starter_gift_name()
+				gift_button.tooltip_text = "Give the nearby villager a %s from the starter inventory." % _starter_gift_name()
 			return
 
 func _starter_gift_payload() -> Dictionary:

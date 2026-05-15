@@ -113,6 +113,14 @@ def test_scene_is_local_canvas_village() -> None:
     assert "drawLantern" in scene_js
     assert "truncate(villager.status" in scene_js
     assert "import * as THREE" not in scene_js
+    # Clover's brook landmark — `LOCATION_POINTS.brook` exists, but the brook
+    # needs an actual draw method so the cast-doc chipped-saucer beat reads
+    # at a glance instead of leaving Clover floating on bare grass.
+    assert "drawBrook" in scene_js
+    assert "this.drawBrook(" in scene_js
+    assert "marigold" in scene_js.lower(), (
+        "Brook landmark should ground Clover's marigold motif on the bank."
+    )
 
 
 def test_web_readme_documents_run_path() -> None:
