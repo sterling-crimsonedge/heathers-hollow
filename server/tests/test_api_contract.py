@@ -143,6 +143,18 @@ async def test_client_bootstrap_payload(server_module: ModuleType) -> None:
     assert margot["home_location"] == "town_square"
     assert "system_prompt" not in margot
     assert "private_goals" not in margot
+    # HH-006/HH-062: the per-villager loved-gift rubric and the per-villager
+    # tuning knobs are server-side only. Clients reading `/client/bootstrap`
+    # or `/villagers/{id}` must not be able to mine them.
+    for villager in payload["villagers"]:
+        assert "loved_tags" not in villager, (
+            f"villager {villager.get('id')} bootstrap payload must not "
+            f"expose loved_tags."
+        )
+        assert "tuning" not in villager, (
+            f"villager {villager.get('id')} bootstrap payload must not "
+            f"expose tuning."
+        )
 
     # The canonical MVP cast must each carry a non-empty, JSON-driven
     # home_location so clients can place all four villagers spatially. Clover

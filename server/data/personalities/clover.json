@@ -18,6 +18,10 @@
   "likes": ["shiny things", "broken things they can fix", "garden bugs", "the bakery in the rain", "anyone who treats them like a real person"],
   "dislikes": ["being told they are too young", "people touching their collected things without asking", "the word later"],
   "loved_tags": ["shiny", "broken", "marigold", "orange", "trinket", "smooth", "keepsake", "stone"],
+  "tuning": {
+    "trust_per_talk_cap": 0,
+    "loved_gift_mood_lock_hours": 1.5
+  },
   "relationships": {
     "heather": {
       "starting_affection": 7,

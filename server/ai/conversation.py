@@ -186,6 +186,7 @@ class ConversationEngine:
             proposed_affection=proposed_affection,
             proposed_trust=proposed_trust,
             world_day=int(world.get("day", 1) or 1),
+            personality=personality,
         )
         relationship = self.memory_store.update_relationship(
             villager_id,
@@ -263,9 +264,14 @@ class ConversationEngine:
         # HH-006 first-of-kind gift bonus: the first gift any player gives a
         # villager bumps the preference up one tier ("the first gift is a
         # relationship event regardless of what it was"). Disliked → neutral,
-        # neutral → liked, liked → loved, loved stays loved.
+        # neutral → liked, liked → loved, loved stays loved. Per-villager
+        # tuning can disable the bonus (`first_gift_bonus_tier: 0`) for a
+        # villager whose personality should never be wooed by the gesture-of-
+        # bringing-anything; in that case we still record `gift_first_done` so
+        # the bonus stays opt-out for the lifetime of the (player, villager) pair.
         first_gift_done = bool(current_metadata.get("gift_first_done"))
-        first_of_kind_bonus = not first_gift_done
+        first_gift_bonus_enabled = self._first_gift_bonus_enabled(personality)
+        first_of_kind_bonus = (not first_gift_done) and first_gift_bonus_enabled
         preference = (
             self._bump_gift_preference(base_preference) if first_of_kind_bonus else base_preference
         )
@@ -293,10 +299,14 @@ class ConversationEngine:
         # gifts are *not* pinned — the rubric stays "loved gifts feel biggest,
         # disliked gifts are a small lingering note" per docs/AI_ARCHITECTURE.md.
         if preference == "loved":
+            pin_kwargs: dict[str, Any] = {"world": self.world_state}
+            override_minutes = self._effective_loved_pin_minutes(personality)
+            if override_minutes is not None:
+                pin_kwargs["duration_minutes"] = override_minutes
             self.mood_tracker.pin(
                 villager_id,
                 self._server_mood_to_tracker_mood(mood),
-                world=self.world_state,
+                **pin_kwargs,
             )
 
         affection_delta = {"loved": 5, "liked": 2, "neutral": 1, "disliked": -1}[preference]
@@ -759,6 +769,7 @@ Relevant villager relationships:
         proposed_affection: int,
         proposed_trust: int,
         world_day: int,
+        personality: Personality | None = None,
     ) -> tuple[int, int, dict[str, Any]]:
         """Apply per-in-game-day caps to talk-path affection and trust deltas.
 
@@ -769,6 +780,12 @@ Relevant villager relationships:
         - Negative talk deltas are capped to a single -TALK_NEGATIVE_DAILY_CAP per
           in-game day and never drop affection below 0 from talk alone — the hollow
           notices, but it does not punish.
+
+        When ``personality`` is supplied the global caps can be tightened by the
+        villager's `tuning` block: `affection_per_talk_cap`, `trust_per_talk_cap`,
+        and `negative_talk_per_day_cap` each override the global default for that
+        villager only (and only when the override is non-negative). Omitting any
+        of those keys preserves current behaviour.
 
         Returns (capped_affection_delta, capped_trust_delta, talk_meta_update). The
         metadata update is intended to be merged into the relationship row by the
@@ -788,13 +805,15 @@ Relevant villager relationships:
 
         current_affection = int(current_relationship.get("affection", 0))
 
+        affection_cap, trust_cap, negative_cap = self._effective_talk_caps(personality)
+
         # Affection: cap positive gains, soften negatives.
         affection_delta = int(proposed_affection)
         if affection_delta > 0:
-            remaining_positive = max(0, TALK_AFFECTION_DAILY_CAP - talk_affection_today)
+            remaining_positive = max(0, affection_cap - talk_affection_today)
             affection_delta = min(affection_delta, remaining_positive)
         elif affection_delta < 0:
-            remaining_negative = max(0, TALK_NEGATIVE_DAILY_CAP - talk_negative_today)
+            remaining_negative = max(0, negative_cap - talk_negative_today)
             magnitude = min(abs(affection_delta), remaining_negative)
             affection_delta = -magnitude
             if affection_delta < 0 and current_affection + affection_delta < 0:
@@ -806,7 +825,7 @@ Relevant villager relationships:
 
         # Trust: cap positive gains; negative trust from talk is never proposed today.
         trust_delta = max(0, int(proposed_trust))
-        remaining_trust = max(0, TALK_TRUST_DAILY_CAP - talk_trust_today)
+        remaining_trust = max(0, trust_cap - talk_trust_today)
         trust_delta = min(trust_delta, remaining_trust)
 
         new_affection_today = talk_affection_today + max(0, affection_delta)
@@ -979,6 +998,72 @@ Relevant villager relationships:
         if explicit:
             return explicit
         return set(DEFAULT_LOVED_TAGS)
+
+    @staticmethod
+    def _effective_talk_caps(
+        personality: Personality | None,
+    ) -> tuple[int, int, int]:
+        """Resolve per-villager talk caps from the optional `tuning` block.
+
+        Returns ``(affection_cap, trust_cap, negative_cap)`` where each value
+        defaults to the global HH-006 constant and is overridden only when the
+        villager's `tuning` block supplies a non-negative integer for that key.
+        Negative tuning values are ignored — the global default takes over —
+        so a typo in JSON can't accidentally lock a villager at "no talk gains
+        ever" without an explicit zero.
+        """
+        affection_cap = TALK_AFFECTION_DAILY_CAP
+        trust_cap = TALK_TRUST_DAILY_CAP
+        negative_cap = TALK_NEGATIVE_DAILY_CAP
+        if personality is None:
+            return affection_cap, trust_cap, negative_cap
+        tuning = personality.tuning or {}
+        override_affection = tuning.get("affection_per_talk_cap")
+        if isinstance(override_affection, int) and override_affection >= 0:
+            affection_cap = override_affection
+        override_trust = tuning.get("trust_per_talk_cap")
+        if isinstance(override_trust, int) and override_trust >= 0:
+            trust_cap = override_trust
+        override_negative = tuning.get("negative_talk_per_day_cap")
+        if isinstance(override_negative, int) and override_negative >= 0:
+            negative_cap = override_negative
+        return affection_cap, trust_cap, negative_cap
+
+    @staticmethod
+    def _effective_loved_pin_minutes(personality: Personality) -> int | None:
+        """Resolve the loved-gift mood-pin duration in minutes for a villager.
+
+        HH-006: a villager's `tuning.loved_gift_mood_lock_hours` (float hours)
+        overrides the default ~2-hour pin set by `MoodTracker.pin`. Returns
+        ``None`` when the personality does not supply an override so callers
+        can let `MoodTracker.pin` use its built-in default.
+        """
+        tuning = personality.tuning or {}
+        raw = tuning.get("loved_gift_mood_lock_hours")
+        if raw is None:
+            return None
+        try:
+            hours = float(raw)
+        except (TypeError, ValueError):
+            return None
+        if hours <= 0:
+            return None
+        return max(1, int(round(hours * 60)))
+
+    @staticmethod
+    def _first_gift_bonus_enabled(personality: Personality) -> bool:
+        """Whether the HH-006 first-of-kind tier bump fires for this villager.
+
+        Defaults to enabled. A villager whose `tuning.first_gift_bonus_tier`
+        is explicitly set to 0 opts out so a single hand-crafted gruff villager
+        (e.g. someone whose backstory is "earn it the slow way") doesn't get
+        the cozy free tier on Heather's very first interaction.
+        """
+        tuning = personality.tuning or {}
+        raw = tuning.get("first_gift_bonus_tier")
+        if isinstance(raw, int) and raw == 0:
+            return False
+        return True
 
     @staticmethod
     def _bump_gift_preference(preference: str) -> str:

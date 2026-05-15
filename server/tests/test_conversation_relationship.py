@@ -39,9 +39,17 @@ async def run_conversation_relationship_check() -> None:
 
             assert response["type"] == "villager_reply"
             assert response["mood"] == "warm"
+            # Margot's HH-006 `tuning` block sets `affection_per_talk_cap: 1`
+            # and `trust_per_talk_cap: 0` (see server/data/personalities/margot.json
+            # and docs/AI_ARCHITECTURE.md). Her seeded heather row starts at
+            # affection 8 / trust 12 / familiarity 2; one personal-disclosure
+            # turn earns +1 affection (capped at 1), +0 trust (capped at 0),
+            # and +1 familiarity. Trust intentionally stays at 12 — Margot's
+            # slow-trust register is what makes loved gifts (a separate path
+            # with its own delta) feel like a real event.
             assert response["relationship"] == {
                 "affection": 9,
-                "trust": 13,
+                "trust": 12,
                 "familiarity": 3,
                 "tension": 0,
             }

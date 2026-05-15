@@ -101,6 +101,42 @@ def run_personality_config_check() -> None:
                 f"{villager_id} loved_tags entry {entry!r} must be lowercase."
             )
 
+        # HH-006 optional per-villager tuning block. Only the documented keys
+        # are accepted (others would be dropped by `Personality._coerce_tuning`
+        # at load time, so they should not appear after loading), and each
+        # supported value must be a non-negative number. Empty is allowed for
+        # backward compatibility — the engine falls back to the global HH-006
+        # constants when the block is missing.
+        assert isinstance(personality.tuning, dict)
+        allowed_tuning_keys = {
+            "affection_per_talk_cap",
+            "trust_per_talk_cap",
+            "negative_talk_per_day_cap",
+            "loved_gift_mood_lock_hours",
+            "first_gift_bonus_tier",
+        }
+        for key, value in personality.tuning.items():
+            assert key in allowed_tuning_keys, (
+                f"{villager_id} tuning has unsupported key {key!r}; allowed: "
+                f"{sorted(allowed_tuning_keys)}."
+            )
+            if key == "loved_gift_mood_lock_hours":
+                assert isinstance(value, (int, float)) and not isinstance(value, bool), (
+                    f"{villager_id} tuning.{key} must be a number; got "
+                    f"{type(value).__name__}."
+                )
+                assert value > 0, (
+                    f"{villager_id} tuning.{key} must be > 0; got {value!r}."
+                )
+            else:
+                assert isinstance(value, int) and not isinstance(value, bool), (
+                    f"{villager_id} tuning.{key} must be an int; got "
+                    f"{type(value).__name__}."
+                )
+                assert value >= 0, (
+                    f"{villager_id} tuning.{key} must be >= 0; got {value!r}."
+                )
+
         prompt = personality.prompt_block()
         if personality.quirks:
             assert "Character quirks:" in prompt, (
@@ -167,6 +203,46 @@ def run_personality_config_check() -> None:
             f"{villager_id} loved_tags missing required signature tags {sorted(missing)}; "
             f"current loved_tags = {sorted(loved_tags)}."
         )
+
+    # HH-006 per-villager tuning: lock in the canonical-cast calibration values
+    # documented in `docs/AI_ARCHITECTURE.md` so accidental edits to the JSON
+    # files surface as test failures rather than as quiet shifts in demo feel.
+    # Fern intentionally has no tuning block — she rewards consistency and the
+    # defaults are exactly her register.
+    expected_cast_tuning = {
+        "margot": {
+            "affection_per_talk_cap": 1,
+            "trust_per_talk_cap": 0,
+            "loved_gift_mood_lock_hours": 3,
+        },
+        "hugo": {
+            "affection_per_talk_cap": 1,
+            "loved_gift_mood_lock_hours": 3,
+        },
+        "clover": {
+            "trust_per_talk_cap": 0,
+            "loved_gift_mood_lock_hours": 1.5,
+        },
+        "fern": {},
+    }
+    for villager_id, expected in expected_cast_tuning.items():
+        if villager_id not in store.list_ids():
+            continue
+        actual = dict(store.load(villager_id).tuning)
+        for key, value in expected.items():
+            assert key in actual, (
+                f"{villager_id} tuning missing required key {key!r}; "
+                f"current tuning = {actual!r}."
+            )
+            assert actual[key] == value, (
+                f"{villager_id} tuning.{key} should be {value!r}; "
+                f"got {actual[key]!r}."
+            )
+        if not expected:
+            assert actual == {}, (
+                f"{villager_id} should not ship a tuning block; "
+                f"current tuning = {actual!r}."
+            )
 
 
 def main() -> None:

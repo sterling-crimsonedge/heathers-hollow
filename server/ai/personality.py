@@ -58,6 +58,22 @@ class Personality:
     # only — it is *not* exposed in `public_villager_summary` so clients can't
     # mine the precise gift rubric from the bootstrap payload.
     loved_tags: list[str] = field(default_factory=list)
+    # Optional per-villager HH-006 tuning overrides. Supported keys:
+    #   - affection_per_talk_cap (int): override TALK_AFFECTION_DAILY_CAP
+    #   - trust_per_talk_cap (int): override TALK_TRUST_DAILY_CAP
+    #   - negative_talk_per_day_cap (int): override TALK_NEGATIVE_DAILY_CAP
+    #   - loved_gift_mood_lock_hours (float): override the mood pin duration
+    #       used when a loved gift fires `MoodTracker.pin` (defaults to mood.py
+    #       DEFAULT_PIN_DURATION_MINUTES / 60 ≈ 2.0 hours)
+    #   - first_gift_bonus_tier (int): 1 keeps the HH-006 first-of-kind bump,
+    #       0 disables it for this villager (they are too gruff to be wooed by
+    #       the gesture-of-bringing-anything)
+    # Defaults match the global constants so omitting `tuning` keeps current
+    # behaviour. Like `loved_tags`, `tuning` is *not* exposed in
+    # `public_villager_summary` — the per-villager rubric is mechanically
+    # readable but intentionally hidden from clients so the demo doesn't read
+    # like a stat sheet.
+    tuning: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_json_file(cls, path: Path) -> "Personality":
@@ -90,7 +106,40 @@ class Personality:
                 for tag in data.get("loved_tags", [])
                 if str(tag).strip()
             ],
+            tuning=cls._coerce_tuning(data.get("tuning")),
         )
+
+    @staticmethod
+    def _coerce_tuning(raw: Any) -> dict[str, Any]:
+        """Normalize the optional per-villager tuning block.
+
+        The supported keys (see the dataclass docstring above) are coerced to
+        their expected types so callers don't have to defend against bad JSON
+        every read. Unknown keys are dropped silently — tuning is intentionally
+        narrow so we don't grow a backdoor for arbitrary client-facing data.
+        """
+        if not isinstance(raw, dict):
+            return {}
+        normalized: dict[str, Any] = {}
+        for int_key in (
+            "affection_per_talk_cap",
+            "trust_per_talk_cap",
+            "negative_talk_per_day_cap",
+            "first_gift_bonus_tier",
+        ):
+            if int_key in raw and raw[int_key] is not None:
+                try:
+                    normalized[int_key] = int(raw[int_key])
+                except (TypeError, ValueError):
+                    continue
+        if "loved_gift_mood_lock_hours" in raw and raw["loved_gift_mood_lock_hours"] is not None:
+            try:
+                normalized["loved_gift_mood_lock_hours"] = float(
+                    raw["loved_gift_mood_lock_hours"]
+                )
+            except (TypeError, ValueError):
+                pass
+        return normalized
 
     def starting_relationship(self, subject_id: str) -> dict[str, int]:
         relationship = self.relationships.get(subject_id, {})

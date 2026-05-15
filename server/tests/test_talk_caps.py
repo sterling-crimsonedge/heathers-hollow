@@ -5,8 +5,11 @@ Run from the repo root:
     python -m server.tests.test_talk_caps
 
 These caps prevent slot-machine warmth: ten positive turns in one in-game day
-should not max out Margot's affection or trust, and negative talk should never
-drop a fresh player's affection below zero. Counters reset on a new in-game day.
+should not max out a fresh player's affection or trust, and negative talk
+should never drop a fresh player's affection below zero. Counters reset on a
+new in-game day. The test villager is **Fern**, who keeps the global default
+caps; Margot/Hugo/Clover now ship per-villager `tuning` overrides covered by
+`test_tuning_calibration.py`.
 """
 
 from __future__ import annotations
@@ -30,6 +33,11 @@ from server.world.state import WorldState
 POSITIVE_PERSONAL_TEXT = "I love porcelain teacups and my favorite flower is lavender."
 NEGATIVE_TEXT = "You are awful and mean."
 
+# Fern's seeded affection with the canonical "heather" player. Used by case 3
+# below to verify the negative-talk cap subtracts one and then clamps further
+# negative deltas in the same in-game day.
+SEEDED_FERN_HEATHER_AFFECTION = 5
+
 
 async def _drive_turns(
     engine: ConversationEngine,
@@ -37,13 +45,13 @@ async def _drive_turns(
     player_id: str,
     text: str,
     count: int,
-    location: str = "town_square",
+    location: str = "garden",
 ) -> dict[str, object]:
     response: dict[str, object] = {}
     for _ in range(count):
         response = await engine.handle_player_message(
             player_id=player_id,
-            villager_id="margot",
+            villager_id="fern",
             text=text,
             context={"location": location, "test": "talk_caps"},
         )
@@ -76,7 +84,7 @@ async def run_talk_caps_check() -> None:
             assert positive_rel["trust"] == TALK_TRUST_DAILY_CAP, positive_rel
             assert positive_rel["familiarity"] >= 10, positive_rel
 
-            stored = memory_store.get_relationship("margot", positive_player)
+            stored = memory_store.get_relationship("fern", positive_player)
             stored_meta = stored.get("metadata", {})
             assert stored_meta.get("talk_affection_today") == TALK_AFFECTION_DAILY_CAP, stored_meta
             assert stored_meta.get("talk_trust_today") == TALK_TRUST_DAILY_CAP, stored_meta
@@ -96,15 +104,15 @@ async def run_talk_caps_check() -> None:
             assert negative_rel["affection"] == 0, negative_rel
             assert negative_rel["familiarity"] >= 5, negative_rel
 
-            negative_stored = memory_store.get_relationship("margot", negative_player)
+            negative_stored = memory_store.get_relationship("fern", negative_player)
             negative_stored_meta = negative_stored.get("metadata", {})
             # Floor short-circuits the counter: when the delta is clamped to 0
             # the negative tally does not advance, so cap stays untouched.
             assert negative_stored_meta.get("talk_negative_today") == 0, negative_stored_meta
             assert TALK_NEGATIVE_DAILY_CAP >= 1
 
-            # 3) Seeded relationship case. Margot/heather starts at affection 8 and
-            #    trust 12. One negative talk turn should subtract -1 affection (the
+            # 3) Seeded relationship case. Fern/heather starts at affection 5 and
+            #    trust 8. One negative talk turn should subtract -1 affection (the
             #    daily cap), and the next negative turn the same day should not.
             seeded_first = await _drive_turns(
                 engine,
@@ -113,7 +121,7 @@ async def run_talk_caps_check() -> None:
                 count=1,
             )
             seeded_first_rel = seeded_first["relationship"]  # type: ignore[index]
-            assert seeded_first_rel["affection"] == 7, seeded_first_rel  # 8 - 1
+            assert seeded_first_rel["affection"] == SEEDED_FERN_HEATHER_AFFECTION - 1, seeded_first_rel
             seeded_again = await _drive_turns(
                 engine,
                 player_id="heather",
@@ -122,18 +130,18 @@ async def run_talk_caps_check() -> None:
             )
             seeded_again_rel = seeded_again["relationship"]  # type: ignore[index]
             # Same day -> additional negatives are clamped to 0 affection delta.
-            assert seeded_again_rel["affection"] == 7, seeded_again_rel
+            assert seeded_again_rel["affection"] == SEEDED_FERN_HEATHER_AFFECTION - 1, seeded_again_rel
             # Familiarity still climbs by 1 each turn.
             assert seeded_again_rel["familiarity"] == seeded_first_rel["familiarity"] + 1
 
             # 4) Counter reset on a new in-game day. We simulate the day rollover
             #    by stamping a stale last_talk_day onto the positive player's row.
-            positive_stored = memory_store.get_relationship("margot", positive_player)
+            positive_stored = memory_store.get_relationship("fern", positive_player)
             positive_stored_meta = dict(positive_stored.get("metadata", {}))
             stale_day = int(positive_stored_meta.get("last_talk_day") or 1) - 1
             positive_stored_meta["last_talk_day"] = stale_day
             memory_store.update_relationship(
-                "margot",
+                "fern",
                 positive_player,
                 metadata=positive_stored_meta,
             )

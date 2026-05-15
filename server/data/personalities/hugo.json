@@ -18,6 +18,10 @@
   "likes": ["rain", "bread", "tea", "well-made tools", "sea stories", "warm kitchens"],
   "dislikes": ["empty boasting", "wasted food", "cruel jokes", "perfectly clear skies that last too long"],
   "loved_tags": ["bread", "tea", "rain", "sea", "wood", "well-made", "warm"],
+  "tuning": {
+    "affection_per_talk_cap": 1,
+    "loved_gift_mood_lock_hours": 3
+  },
   "relationships": {
     "heather": {
       "starting_affection": 4,
