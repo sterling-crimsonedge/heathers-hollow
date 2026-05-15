@@ -188,6 +188,91 @@ def test_gift_picker_surfaces_full_starter_inventory() -> None:
     assert ".gift-caption" in index_html
 
 
+def test_welcome_overlay_orients_first_time_players() -> None:
+    """A new player who opens the web demo cold should see a soft
+    cottagecore "step inside" panel that introduces the four villagers
+    and the basic controls, and that auto-dismisses on confident
+    actions (Begin button, ESC, first WASD/arrow movement, first
+    villager select) so it never gets in the way.
+    """
+    index_html = read_web_file("index.html")
+    main_js = read_web_file("main.js")
+
+    # The overlay element exists with the right ARIA wiring so screen
+    # readers announce it as a modal.
+    assert 'id="welcome-overlay"' in index_html
+    assert 'role="dialog"' in index_html
+    assert 'aria-modal="true"' in index_html
+    assert 'id="welcome-title"' in index_html
+    assert 'aria-labelledby="welcome-title"' in index_html
+    assert 'id="welcome-begin"' in index_html
+
+    # The CSS scaffolds the overlay and the hidden state used to fade
+    # it out on dismiss.
+    assert ".welcome-overlay" in index_html
+    assert ".welcome-overlay.hidden" in index_html
+    assert ".welcome-card" in index_html
+    assert ".welcome-cast" in index_html
+    assert ".welcome-controls" in index_html
+
+    # All four canonical MVP villagers are named in the cast block so
+    # Heather can recognize each one when she walks up to them.
+    for name in ("Margot", "Fern", "Hugo", "Clover"):
+        assert name in index_html, (
+            f"Welcome overlay should name {name} so the cast feels "
+            f"introduced, not anonymous."
+        )
+
+    # The control hints cover walking, the talk affordance, and the
+    # gift picker so a first-time player has nothing to guess.
+    assert ">W</kbd>" in index_html
+    assert ">A</kbd>" in index_html
+    assert ">S</kbd>" in index_html
+    assert ">D</kbd>" in index_html
+    assert ">E</kbd>" in index_html
+
+    # JS wiring: dismiss helper, dismiss-key set, and the four dismiss
+    # paths (button click, ESC, first movement key, first villager
+    # select). Without these the overlay would either trap the user or
+    # never appear at all.
+    assert "function dismissWelcome" in main_js
+    assert "function installWelcomeOverlay" in main_js
+    assert "installWelcomeOverlay();" in main_js
+    assert "welcomeDismissed: false" in main_js
+    assert "WELCOME_DISMISS_KEYS" in main_js
+    assert "WELCOME_DISMISS_KEYS.has(key)" in main_js
+    assert "dom.welcomeBegin" in main_js
+    assert 'key === "escape"' in main_js
+    # selectVillager() should call dismissWelcome() so clicking a card
+    # also clears the overlay.
+    select_block = main_js[main_js.index("function selectVillager") : main_js.index("function selectVillager") + 600]
+    assert "dismissWelcome()" in select_block, (
+        "selectVillager should dismiss the welcome overlay so a player "
+        "who clicks a villager card before reading the panel can reach "
+        "the chat input immediately."
+    )
+
+    # On open, the Begin button should receive focus so keyboard-first
+    # and screen-reader visitors hear the dialog announcement and can
+    # press Enter to dismiss without hunting for the button. The focus
+    # call lives inside installWelcomeOverlay() and is wrapped in
+    # requestAnimationFrame so the initial paint completes first.
+    install_block = main_js[
+        main_js.index("function installWelcomeOverlay")
+        : main_js.index("function installWelcomeOverlay") + 1200
+    ]
+    assert "dom.welcomeBegin.focus" in install_block, (
+        "installWelcomeOverlay should focus the Begin button on open so "
+        "the welcome dialog is keyboard- and screen-reader-actionable "
+        "without the visitor having to Tab to it."
+    )
+    assert "requestAnimationFrame" in install_block, (
+        "The Begin-button focus call should be deferred via "
+        "requestAnimationFrame so it runs after the initial layout and "
+        "the focus actually takes."
+    )
+
+
 def test_web_readme_documents_run_path() -> None:
     readme = read_web_file("README.md")
 
@@ -207,6 +292,7 @@ def main() -> None:
     test_web_demo_drops_worktree_cast_names()
     test_scene_is_local_canvas_village()
     test_gift_picker_surfaces_full_starter_inventory()
+    test_welcome_overlay_orients_first_time_players()
     test_web_readme_documents_run_path()
     print("PASS: Root browser demo uses the canonical client protocol.")
 

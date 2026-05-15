@@ -124,6 +124,8 @@ const dom = {
   messageInput: document.getElementById("message-input"),
   sendButton: document.getElementById("send-button"),
   refreshContext: document.getElementById("refresh-context"),
+  welcomeOverlay: document.getElementById("welcome-overlay"),
+  welcomeBegin: document.getElementById("welcome-begin"),
 };
 
 const state = {
@@ -141,7 +143,15 @@ const state = {
   pendingReply: false,
   chatHistoryByVillagerId: {},
   keys: new Set(),
+  welcomeDismissed: false,
 };
+
+// Keys that count as a "first move" — pressing any of these auto-dismisses
+// the welcome overlay so a confident player never has to read it twice.
+const WELCOME_DISMISS_KEYS = new Set([
+  "w", "a", "s", "d",
+  "arrowup", "arrowdown", "arrowleft", "arrowright",
+]);
 
 const scene = createVillageScene(dom.canvas, {
   onVillagerClick: (villagerId) => selectVillager(villagerId, { refreshContext: true }),
@@ -159,6 +169,7 @@ const scene = createVillageScene(dom.canvas, {
 init();
 
 async function init() {
+  installWelcomeOverlay();
   installInputHandlers();
   scene.setWorld(state.world);
   scene.setVillagers(FALLBACK_VILLAGERS);
@@ -167,6 +178,42 @@ async function init() {
   await loadBootstrap();
   connectSocket();
   requestAnimationFrame(inputLoop);
+}
+
+function installWelcomeOverlay() {
+  if (!dom.welcomeOverlay) return;
+  if (new URLSearchParams(window.location.search).get("skip_welcome") === "1") {
+    dismissWelcome();
+    return;
+  }
+  if (dom.welcomeBegin) {
+    dom.welcomeBegin.addEventListener("click", () => {
+      dismissWelcome();
+      dom.messageInput.focus({ preventScroll: true });
+    });
+    // Land focus on the Begin button so keyboard-first and screen-reader
+    // visitors hear the dialog announcement and can press Enter to step
+    // inside without hunting. requestAnimationFrame waits past the
+    // initial layout so the focus actually takes; we re-check
+    // welcomeDismissed in case the player has already moved.
+    requestAnimationFrame(() => {
+      if (!state.welcomeDismissed && dom.welcomeBegin) {
+        dom.welcomeBegin.focus({ preventScroll: true });
+      }
+    });
+  }
+  // Don't dismiss on a stray canvas click while the player is still
+  // reading; the Begin button is intentional and the movement/select
+  // dismiss paths cover players who skip the overlay.
+}
+
+function dismissWelcome() {
+  if (state.welcomeDismissed) return;
+  state.welcomeDismissed = true;
+  if (dom.welcomeOverlay) {
+    dom.welcomeOverlay.classList.add("hidden");
+    dom.welcomeOverlay.setAttribute("aria-hidden", "true");
+  }
 }
 
 async function loadBootstrap() {
@@ -303,6 +350,9 @@ async function loadVillagerContext(villagerId, options = {}) {
 
 function selectVillager(villagerId, options = {}) {
   if (!state.villagersById[villagerId]) return;
+  // Selecting a villager is a clear "I'm playing now" signal — dismiss
+  // the welcome overlay so the chat input is reachable.
+  dismissWelcome();
   state.activeVillagerId = villagerId;
   scene.setActiveVillager(villagerId);
   if (!state.chatHistoryByVillagerId[villagerId]) {
@@ -520,9 +570,20 @@ function appendMessageElement(role, text) {
 
 function installInputHandlers() {
   window.addEventListener("keydown", (event) => {
+    const key = event.key.toLowerCase();
+    // ESC dismisses the welcome overlay even before the player moves.
+    if (key === "escape" && !state.welcomeDismissed) {
+      dismissWelcome();
+      return;
+    }
+    // The very first walk-around keypress auto-dismisses the welcome
+    // overlay so a confident player never has to click the button.
+    if (!state.welcomeDismissed && WELCOME_DISMISS_KEYS.has(key)) {
+      dismissWelcome();
+    }
     const typing = document.activeElement === dom.messageInput;
     if (typing) return;
-    state.keys.add(event.key.toLowerCase());
+    state.keys.add(key);
     if ((event.key === "e" || event.key === " " || event.key === "Enter") && state.nearbyVillagerId) {
       event.preventDefault();
       selectVillager(state.nearbyVillagerId, { refreshContext: true });

@@ -463,6 +463,125 @@
       font-size: 13px;
     }
 
+    /* First-time welcome overlay — a soft cottagecore "step inside" panel
+       that orients Heather before her first interaction. Dismisses on
+       button click, ESC, first WASD/arrow movement, or first villager
+       select. Per-session only (no localStorage), so a refresh always
+       greets her warmly again. */
+    .welcome-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 30;
+      display: grid;
+      place-items: center;
+      background: rgba(70, 61, 53, 0.32);
+      backdrop-filter: blur(4px);
+      transition: opacity 0.32s ease;
+    }
+
+    .welcome-overlay.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .welcome-card {
+      width: min(440px, calc(100vw - 32px));
+      background: var(--ivory);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      box-shadow: 0 18px 48px rgba(70, 61, 53, 0.32);
+      padding: 24px 26px 22px;
+      text-align: left;
+      color: var(--ink);
+    }
+
+    .welcome-card h2 {
+      margin: 0 0 6px;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 24px;
+      color: #6b5748;
+      line-height: 1.15;
+    }
+
+    .welcome-card p.welcome-lede {
+      margin: 0 0 14px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .welcome-cast {
+      display: grid;
+      gap: 6px;
+      margin: 0 0 14px;
+      padding: 12px 14px;
+      background: rgba(248, 240, 223, 0.7);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+    }
+
+    .welcome-cast-line {
+      font-size: 13px;
+      line-height: 1.4;
+      color: var(--ink);
+    }
+
+    .welcome-cast-line strong {
+      color: #6b5748;
+    }
+
+    .welcome-controls {
+      margin: 0 0 16px;
+      padding: 0;
+      list-style: none;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 6px 14px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .welcome-controls li {
+      line-height: 1.35;
+    }
+
+    .welcome-controls kbd {
+      font: inherit;
+      font-weight: 800;
+      color: var(--ink);
+      background: rgba(95, 127, 93, 0.16);
+      border: 1px solid rgba(95, 127, 93, 0.34);
+      border-radius: 5px;
+      padding: 1px 6px;
+      margin-right: 4px;
+    }
+
+    .welcome-card p.welcome-promise {
+      margin: 0 0 18px;
+      font-size: 12px;
+      color: #6b5748;
+      font-style: italic;
+      line-height: 1.4;
+    }
+
+    .welcome-actions {
+      display: flex;
+      justify-content: flex-end;
+    }
+
+    .welcome-actions button {
+      background: var(--rose);
+      color: var(--ivory);
+      padding: 10px 18px;
+      font-size: 13px;
+      letter-spacing: 0.02em;
+    }
+
+    .welcome-actions button:hover:not(:disabled),
+    .welcome-actions button:focus-visible:not(:disabled) {
+      background: var(--clay);
+    }
+
     @media (max-width: 1040px) {
       .context-panel {
         display: none;
@@ -501,6 +620,34 @@
 </head>
 <body>
   <canvas id="village-canvas" aria-label="Heather's Hollow village view"></canvas>
+
+  <div class="welcome-overlay" id="welcome-overlay" role="dialog" aria-modal="true" aria-labelledby="welcome-title">
+    <div class="welcome-card">
+      <h2 id="welcome-title">Welcome to the hollow</h2>
+      <p class="welcome-lede">
+        Four neighbors live here. They remember every visit, every gift, every
+        little thing you tell them. Be gentle &mdash; they will be.
+      </p>
+      <div class="welcome-cast" aria-label="Villagers you'll meet">
+        <div class="welcome-cast-line"><strong>Margot</strong> &mdash; rabbit, soft-spoken porcelain painter, near the town square.</div>
+        <div class="welcome-cast-line"><strong>Fern</strong> &mdash; deer, anxious herbalist who tends the garden.</div>
+        <div class="welcome-cast-line"><strong>Hugo</strong> &mdash; bear, retired sailor turned baker, in the shop.</div>
+        <div class="welcome-cast-line"><strong>Clover</strong> &mdash; fox kit collecting broken treasures by the brook.</div>
+      </div>
+      <ul class="welcome-controls" aria-label="Controls">
+        <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> walk around</li>
+        <li><kbd>E</kbd> talk to a nearby villager</li>
+        <li>Click a villager card to select them</li>
+        <li>Choose a gift from the row below the chat</li>
+      </ul>
+      <p class="welcome-promise">
+        Their personalities live on the server. The hollow is listening.
+      </p>
+      <div class="welcome-actions">
+        <button type="button" id="welcome-begin">Step into the hollow</button>
+      </div>
+    </div>
+  </div>
 
   <header class="panel topbar">
     <div class="brand">
