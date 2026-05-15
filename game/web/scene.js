@@ -28,8 +28,50 @@ const TIME_SKIES = {
   midday: ["#a8cfe5", "#f8f0df"],
   afternoon: ["#c2d9d1", "#f6e4c5"],
   evening: ["#d9a7aa", "#f2d5bb"],
-  night: ["#34395f", "#a5adc9"],
+  night: ["#1c2046", "#4a5083"],
 };
+
+// Translucent full-scene washes keyed to `world.time_label` so the entire
+// hollow shifts mood with the clock instead of only the sky band. Midday and
+// morning intentionally have no wash so noon stays neutral. Evening is a soft
+// peach, dawn is rose-gold, and night is a cool indigo that gives the lanterns
+// real work to do.
+const TIME_WASH = {
+  dawn: { color: "#f3b58a", alpha: 0.18 },
+  morning: null,
+  midday: null,
+  afternoon: { color: "#f7d6a6", alpha: 0.1 },
+  evening: { color: "#d18a7c", alpha: 0.22 },
+  night: { color: "#1d244d", alpha: 0.38 },
+};
+
+// Pre-baked starfield offsets sampled in scene-local coordinates so the stars
+// don't jitter every frame; only their twinkle phase advances with `time`.
+const STAR_FIELD = [
+  { x: 0.07, y: 0.05, base: 1.6, phase: 0.0 },
+  { x: 0.13, y: 0.11, base: 1.1, phase: 1.3 },
+  { x: 0.19, y: 0.04, base: 1.4, phase: 2.6 },
+  { x: 0.24, y: 0.14, base: 1.0, phase: 0.7 },
+  { x: 0.31, y: 0.07, base: 1.5, phase: 3.4 },
+  { x: 0.37, y: 0.18, base: 1.2, phase: 4.1 },
+  { x: 0.42, y: 0.06, base: 1.4, phase: 5.5 },
+  { x: 0.48, y: 0.13, base: 1.0, phase: 0.4 },
+  { x: 0.54, y: 0.04, base: 1.6, phase: 2.1 },
+  { x: 0.61, y: 0.16, base: 1.1, phase: 3.7 },
+  { x: 0.66, y: 0.08, base: 1.3, phase: 5.2 },
+  { x: 0.72, y: 0.18, base: 1.0, phase: 1.0 },
+  { x: 0.79, y: 0.04, base: 1.5, phase: 4.4 },
+  { x: 0.84, y: 0.12, base: 1.2, phase: 0.9 },
+  { x: 0.9, y: 0.07, base: 1.4, phase: 2.5 },
+  { x: 0.95, y: 0.16, base: 1.1, phase: 3.0 },
+  { x: 0.03, y: 0.19, base: 1.3, phase: 4.8 },
+  { x: 0.16, y: 0.21, base: 1.0, phase: 5.9 },
+  { x: 0.27, y: 0.22, base: 1.2, phase: 1.7 },
+  { x: 0.46, y: 0.22, base: 1.1, phase: 3.6 },
+  { x: 0.58, y: 0.23, base: 1.3, phase: 2.2 },
+  { x: 0.71, y: 0.21, base: 1.0, phase: 4.7 },
+  { x: 0.86, y: 0.22, base: 1.2, phase: 0.2 },
+];
 
 export function createVillageScene(canvas, hooks = {}) {
   return new VillageScene(canvas, hooks);
@@ -187,31 +229,78 @@ class VillageScene {
   draw(time) {
     const ctx = this.ctx;
     ctx.clearRect(0, 0, this.width, this.height);
-    this.drawSky(ctx);
+    this.drawSky(ctx, time);
     this.drawGround(ctx);
     this.drawVillage(ctx, time);
+    this.applyTimeOfDayWash(ctx);
   }
 
-  drawSky(ctx) {
-    const sky = TIME_SKIES[this.world.time_label] || TIME_SKIES.morning;
+  drawSky(ctx, time) {
+    const label = this.world.time_label || "morning";
+    const sky = TIME_SKIES[label] || TIME_SKIES.morning;
     const gradient = ctx.createLinearGradient(0, 0, 0, this.height);
     gradient.addColorStop(0, sky[0]);
     gradient.addColorStop(0.58, sky[1]);
-    gradient.addColorStop(1, "#d5c69f");
+    gradient.addColorStop(1, label === "night" ? "#6a6e94" : "#d5c69f");
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, this.width, this.height);
 
-    const night = this.world.time_label === "night";
+    const night = label === "night";
+    const evening = label === "evening";
+    if (night || evening) {
+      this.drawStars(ctx, time || 0, night ? 1 : 0.45);
+    }
+
     ctx.save();
-    ctx.globalAlpha = night ? 0.9 : 0.78;
+    ctx.globalAlpha = night ? 0.92 : 0.78;
     ctx.fillStyle = night ? "#fff5cf" : "#f2c57c";
     ctx.beginPath();
-    ctx.arc(this.width * 0.78, this.height * 0.16, night ? 20 : 30, 0, Math.PI * 2);
+    ctx.arc(this.width * 0.78, this.height * 0.16, night ? 18 : 30, 0, Math.PI * 2);
     ctx.fill();
+    if (night) {
+      ctx.globalAlpha = 0.18;
+      ctx.fillStyle = "#fff5cf";
+      ctx.beginPath();
+      ctx.arc(this.width * 0.78, this.height * 0.16, 38, 0, Math.PI * 2);
+      ctx.fill();
+    }
     ctx.restore();
 
-    this.drawCloud(ctx, this.width * 0.18, this.height * 0.17, 1.05);
-    this.drawCloud(ctx, this.width * 0.44, this.height * 0.11, 0.72);
+    // Clouds fade at night so they read as silhouettes instead of glowing
+    // patches against the indigo sky. Keep both during daytime for the
+    // existing cottagecore-pastoral feel.
+    const cloudAlpha = night ? 0.16 : 1;
+    this.drawCloud(ctx, this.width * 0.18, this.height * 0.17, 1.05, cloudAlpha);
+    this.drawCloud(ctx, this.width * 0.44, this.height * 0.11, 0.72, cloudAlpha);
+  }
+
+  drawStars(ctx, time, intensity) {
+    // Pre-baked starfield in the top quarter of the sky, twinkling on the
+    // shared `time` clock so the village never feels frozen at night.
+    ctx.save();
+    const horizon = this.height * 0.28;
+    for (const star of STAR_FIELD) {
+      const twinkle = 0.55 + 0.45 * (0.5 + 0.5 * Math.sin(time * 1.7 + star.phase));
+      ctx.globalAlpha = Math.min(1, intensity * twinkle);
+      ctx.fillStyle = "#fffaf0";
+      ctx.beginPath();
+      ctx.arc(this.width * star.x, horizon * star.y * 3.3, star.base, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  applyTimeOfDayWash(ctx) {
+    // Soft full-scene tint applied after every village element is drawn so the
+    // ground, buildings, and villagers all shift mood with the clock. Skip
+    // morning/midday so noon stays neutral and the cottagecore palette pops.
+    const wash = TIME_WASH[this.world.time_label || "morning"];
+    if (!wash) return;
+    ctx.save();
+    ctx.globalAlpha = wash.alpha;
+    ctx.fillStyle = wash.color;
+    ctx.fillRect(0, 0, this.width, this.height);
+    ctx.restore();
   }
 
   drawGround(ctx) {
@@ -560,16 +649,27 @@ class VillageScene {
     ctx.arc(-5, -20, 2, 0, Math.PI * 2);
     ctx.arc(5, -20, 2, 0, Math.PI * 2);
     ctx.fill();
+    // Name plate. Tall enough now to fit the archetype line under the
+    // display name so Heather can tell who is who without clicking each
+    // villager.
+    const archetype = truncate(villager.archetype || "", 22);
+    const labelHeight = archetype ? 30 : 20;
+    const labelTop = -58 - (archetype ? 6 : 0);
     ctx.fillStyle = "rgba(255, 250, 240, 0.94)";
     ctx.strokeStyle = "rgba(70, 61, 53, 0.22)";
     ctx.lineWidth = 1;
-    roundedRect(ctx, -44, -58, 88, 20, 8);
+    roundedRect(ctx, -50, labelTop, 100, labelHeight, 9);
     ctx.fill();
     ctx.stroke();
     ctx.fillStyle = "#463d35";
     ctx.font = "700 11px Avenir Next, Arial";
     ctx.textAlign = "center";
-    ctx.fillText(villager.display_name, 0, -44);
+    ctx.fillText(villager.display_name, 0, labelTop + 13);
+    if (archetype) {
+      ctx.fillStyle = "rgba(70, 61, 53, 0.72)";
+      ctx.font = "500 9px Avenir Next, Arial";
+      ctx.fillText(archetype, 0, labelTop + 25);
+    }
     if (villager.status) {
       ctx.fillStyle = "rgba(70, 61, 53, 0.84)";
       roundedRect(ctx, -40, -35, 80, 16, 7);
@@ -578,14 +678,32 @@ class VillageScene {
       ctx.font = "700 9px Avenir Next, Arial";
       ctx.fillText(truncate(villager.status, 16), 0, -24);
     }
+    // Interaction cue — a soft "E" bubble appears above villagers Heather is
+    // close to but has not selected yet, mirroring the bottom-of-screen
+    // prompt so the affordance is also in-world.
+    if (nearby && !active) {
+      const bubbleTop = labelTop - 22;
+      const pulse = 1 + Math.sin(time * 4) * 0.08;
+      ctx.fillStyle = "rgba(201, 131, 139, 0.92)";
+      ctx.strokeStyle = "rgba(255, 250, 240, 0.85)";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(0, bubbleTop, 10 * pulse, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = "#fffaf0";
+      ctx.font = "700 11px Avenir Next, Arial";
+      ctx.fillText("E", 0, bubbleTop + 4);
+    }
     ctx.restore();
   }
 
-  drawCloud(ctx, x, y, scale) {
+  drawCloud(ctx, x, y, scale, alpha = 1) {
+    if (alpha <= 0) return;
     const width = 74 * scale;
     ctx.save();
     ctx.translate(x, y);
-    ctx.globalAlpha = 0.38;
+    ctx.globalAlpha = 0.38 * alpha;
     ctx.fillStyle = "#fffaf0";
     ctx.beginPath();
     ctx.ellipse(-width * 0.26, 0, width * 0.25, width * 0.11, 0, 0, Math.PI * 2);

@@ -121,6 +121,24 @@ def test_scene_is_local_canvas_village() -> None:
     assert "marigold" in scene_js.lower(), (
         "Brook landmark should ground Clover's marigold motif on the bank."
     )
+    # HH-061 visual polish: a full-scene time-of-day wash so dawn/evening/
+    # night actually re-tint the whole hollow, a starfield at night, and
+    # richer villager labels (archetype line plus an in-world interaction
+    # cue when Heather is nearby but hasn't selected anyone yet).
+    assert "applyTimeOfDayWash" in scene_js
+    assert "this.applyTimeOfDayWash(" in scene_js
+    assert "TIME_WASH" in scene_js
+    assert "drawStars" in scene_js
+    assert "this.drawStars(" in scene_js
+    assert "STAR_FIELD" in scene_js
+    assert "villager.archetype" in scene_js, (
+        "Villager labels should show archetype so Heather can identify "
+        "each villager at a glance."
+    )
+    assert "nearby && !active" in scene_js, (
+        "Nearby-but-not-active villagers should advertise the 'E' interaction "
+        "cue in-world, mirroring the bottom-of-screen prompt."
+    )
 
 
 def test_web_readme_documents_run_path() -> None:
