@@ -19,8 +19,8 @@ const FALLBACK_STARTER_GIFT := {
 #   - `town_square`: Margot's existing plaza spot near the central fountain.
 #   - `garden`: edge of the cottage garden plots southwest of the plaza.
 #   - `shop`: just in front of the shop cottage to the east.
-#   - `brook`: between the plaza and shop until a real `_create_brook()`
-#     landmark exists in the Godot scene, mirroring the web demo's (4, 5).
+#   - `brook`: the S-bend of water laid down by `_create_brook()` between
+#     the plaza and shop, mirroring the web demo's (4, 5) landmark.
 # Villagers without a known home_location fall through to FALLBACK_VILLAGER_POSITIONS.
 const HOME_LOCATION_POSITIONS := {
 	"town_square": Vector3(2.5, 0, 0.7),
@@ -123,6 +123,7 @@ func _create_village() -> void:
 	_create_cottage("Shop", Vector3(11, 0, -2), "#F7E3B4", "#9EC7D8")
 	_create_garden(Vector3(-9, 0, -8))
 	_create_bench(Vector3(3.7, 0, 3.6))
+	_create_brook(HOME_LOCATION_POSITIONS["brook"])
 
 func _spawn_player() -> void:
 	player = PLAYER_SCENE.instantiate()
@@ -989,3 +990,58 @@ func _create_bench(position: Vector3) -> void:
 	_add_box("BenchBack", position + Vector3(0, 0.86, 0.23), Vector3(2.0, 0.62, 0.18), "#C98964")
 	_add_cylinder("BenchLegLeft", position + Vector3(-0.74, 0, -0.15), 0.07, 0.42, "#6E5144")
 	_add_cylinder("BenchLegRight", position + Vector3(0.74, 0, -0.15), 0.07, 0.42, "#6E5144")
+
+func _create_brook(position: Vector3) -> void:
+	# Clover's home — a soft S-bend of water with marigold tufts on the bank,
+	# mirroring `drawBrook()` in `game/web/scene.js`. The brook flows along x
+	# and bends around `position` (the canonical `home_location` for clover),
+	# so Clover spawns standing on the dry bank at the bend instead of in the
+	# stream. Keep the geometry primitive-only (boxes + spheres) to match the
+	# rest of the generated village in this file.
+	#
+	# Wet earth bank — a darker oblong under the water that grounds the
+	# marigolds and reads as moist ground instead of grass.
+	_add_box("BrookBank", position + Vector3(0, 0.02, 0), Vector3(5.6, 0.04, 2.4), "#705C46")
+
+	# Brook body — two flat boxes flanking the bend. Together they sketch the
+	# canvas demo's S-curve without needing a real curved mesh, and the gap
+	# between them lines up with `HOME_LOCATION_POSITIONS["brook"]` so Clover
+	# stands on the dry bank rather than the water.
+	_add_box("BrookWaterWest", position + Vector3(-1.55, 0.05, -0.2), Vector3(2.4, 0.04, 0.85), "#88A9BF")
+	_add_box("BrookWaterEast", position + Vector3(1.55, 0.05, 0.25), Vector3(2.4, 0.04, 0.85), "#88A9BF")
+
+	# Lighter highlight strips so the water reads as flowing rather than flat.
+	# Sits a hair above the main water plane to avoid z-fighting.
+	_add_box("BrookWaterHighlightWest", position + Vector3(-1.55, 0.07, -0.2), Vector3(2.2, 0.03, 0.18), "#D9E6EC")
+	_add_box("BrookWaterHighlightEast", position + Vector3(1.55, 0.07, 0.25), Vector3(2.2, 0.03, 0.18), "#D9E6EC")
+
+	# Marigold clusters on the banks — Clover's cast-doc orange motif. Each
+	# cluster is a soft green tuft grounding an orange marigold sphere with a
+	# pale center bead. Positions alternate banks so the brook feels lined.
+	var marigold_offsets := [
+		Vector3(-2.05, 0, -0.95),
+		Vector3(-1.15, 0, 0.95),
+		Vector3(0.40, 0, -0.95),
+		Vector3(1.45, 0, 0.95),
+		Vector3(2.30, 0, -0.90),
+	]
+	for offset in marigold_offsets:
+		var marigold_center := position + offset
+		_add_box(
+			"BrookMarigoldTuft",
+			marigold_center + Vector3(0, 0.05, 0),
+			Vector3(0.58, 0.04, 0.32),
+			"#5F7F64"
+		)
+		_add_sphere(
+			"BrookMarigoldPetals",
+			marigold_center + Vector3(0, 0.18, 0),
+			0.16,
+			"#F0A35A"
+		)
+		_add_sphere(
+			"BrookMarigoldCenter",
+			marigold_center + Vector3(0, 0.24, 0),
+			0.06,
+			"#FFE8B0"
+		)

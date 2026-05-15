@@ -349,6 +349,65 @@ def test_main_multi_villager_spawn_from_bootstrap_wiring() -> None:
         ), f"HH-004 spawn map should reference {villager_id!r}."
 
 
+def test_main_create_brook_landmark_wiring() -> None:
+    """Clover's home should read in 3D: a `_create_brook()` landmark.
+
+    Parallels the web-demo's `drawBrook()` static guardrail. The Godot scene
+    used to place Clover on bare grass at `HOME_LOCATION_POSITIONS["brook"]`;
+    after this follow-up the village setup must lay down a water/marigold
+    landmark at the same anchor so the brook reads as a real place. Runtime
+    validation in Godot is still blocked without a `godot4` binary, so the
+    static check is the durable proof.
+    """
+    main_script = _read(GAME_ROOT / "scripts/main.gd")
+
+    # The landmark builder exists and the village setup calls it.
+    assert "func _create_brook(position: Vector3) -> void" in main_script, (
+        "Expected a `_create_brook(position)` landmark builder paralleling "
+        "`_create_garden`, `_create_bench`, and `_create_tree`."
+    )
+    assert "_create_brook(HOME_LOCATION_POSITIONS[\"brook\"])" in main_script, (
+        "`_create_village` should call `_create_brook` at the canonical "
+        "brook home_location anchor so Clover's spawn lines up with the "
+        "rendered water/marigold landmark."
+    )
+
+    # Inspect the brook body so the landmark cannot silently regress into a
+    # bare-grass placeholder. We require water geometry, a paler highlight,
+    # and the marigold tufts that anchor Clover's cast-doc orange motif.
+    brook_body = main_script.split("func _create_brook(", 1)[1]
+    brook_body = brook_body.split("\nfunc ", 1)[0]
+    assert "BrookBank" in brook_body, "Brook should have a wet-earth bank."
+    assert "BrookWaterWest" in brook_body and "BrookWaterEast" in brook_body, (
+        "Brook body should sketch the S-bend with two flanking water "
+        "boxes (`BrookWaterWest` and `BrookWaterEast`)."
+    )
+    assert (
+        "BrookWaterHighlightWest" in brook_body
+        and "BrookWaterHighlightEast" in brook_body
+    ), "Brook should ride a paler highlight strip so it reads as flowing water."
+    assert "BrookMarigoldPetals" in brook_body, (
+        "Brook landmark should ground Clover's marigold motif on the bank."
+    )
+    assert "BrookMarigoldCenter" in brook_body and "BrookMarigoldTuft" in brook_body
+    # Cast-doc orange + warm pale center colors must be present so the motif
+    # cannot drift into a generic green/blue palette.
+    assert "#F0A35A" in brook_body, (
+        "Marigold petals should keep Clover's cast-doc orange (#F0A35A)."
+    )
+    assert "#FFE8B0" in brook_body, "Marigold centers should keep the warm pale bead."
+    # Soft blue water color matching the web demo's brook stroke.
+    assert "#88A9BF" in brook_body
+
+    # Marigold cluster must be a real loop with at least three cluster
+    # offsets so the bank doesn't degrade into a single isolated marigold.
+    assert "var marigold_offsets" in brook_body
+    assert brook_body.count("Vector3(") >= 6, (
+        "Brook should declare multiple marigold offset vectors plus the "
+        "primary water/bank positions."
+    )
+
+
 def test_main_reply_memory_influence_status_wiring() -> None:
     main_script = _read(GAME_ROOT / "scripts/main.gd")
 
@@ -396,6 +455,7 @@ def main() -> None:
     test_main_context_refresh_after_interactions_wiring()
     test_main_dialogue_context_summary_wiring()
     test_main_multi_villager_spawn_from_bootstrap_wiring()
+    test_main_create_brook_landmark_wiring()
     test_main_reply_memory_influence_status_wiring()
     print("✓ Godot project static checks passed")
 
