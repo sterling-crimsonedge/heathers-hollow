@@ -46,6 +46,18 @@ TALK_NEGATIVE_DAILY_CAP = 1
 TALK_MOOD_NUDGE_DEFAULT = 0.45
 TALK_MOOD_NUDGE_PERSONAL = 0.6
 
+# HH-006 gift-path tuning (see docs/AI_ARCHITECTURE.md "Mood And Relationship Tuning Rules").
+# Gift preferences are ordered from coldest to warmest; the first gift a villager
+# receives from a player gets bumped up one tier on this ladder so the moment
+# feels like a relationship event regardless of taste match.
+GIFT_PREFERENCE_LADDER: tuple[str, ...] = ("disliked", "neutral", "liked", "loved")
+# Repeated-gift dampening: if the same item_id has been gifted this villager by
+# this player within the trailing window, halve the affection delta on the
+# triggering gift (and any further repeats) toward zero. Mood, memory writes,
+# and trust deltas are intentionally unaffected so the moment still registers.
+GIFT_REPEAT_WINDOW_DAYS = 3
+GIFT_REPEAT_DAMPEN_THRESHOLD = 2
+
 
 class ConversationEngine:
     """Builds prompts, calls the configured LLM provider, and persists memory."""
@@ -235,15 +247,29 @@ class ConversationEngine:
         item = normalize_gift_item(item)
         personality = self.personality_store.load(villager_id)
         self.memory_store.upsert_villager(villager_id, personality.display_name, str(personality.config_path))
-        self.memory_store.get_relationship(
+        current_relationship = self.memory_store.get_relationship(
             villager_id,
             player_id,
             personality.starting_relationship(player_id),
         )
+        current_metadata = dict(current_relationship.get("metadata") or {})
         item_name = str(item.get("display_name") or item.get("item_id") or "something")
+        item_id = str(item.get("item_id") or "").strip().lower()
         item_tags = {str(tag).lower() for tag in item.get("tags", [])}
         item_category = str(item.get("category", "")).lower()
-        preference = self._gift_preference(personality, item_category, item_tags)
+        base_preference = self._gift_preference(personality, item_category, item_tags)
+        world_day = int(self.world_state.snapshot().get("day", 1) or 1)
+
+        # HH-006 first-of-kind gift bonus: the first gift any player gives a
+        # villager bumps the preference up one tier ("the first gift is a
+        # relationship event regardless of what it was"). Disliked → neutral,
+        # neutral → liked, liked → loved, loved stays loved.
+        first_gift_done = bool(current_metadata.get("gift_first_done"))
+        first_of_kind_bonus = not first_gift_done
+        preference = (
+            self._bump_gift_preference(base_preference) if first_of_kind_bonus else base_preference
+        )
+
         mood = {
             "loved": "delighted",
             "liked": "warm",
@@ -275,6 +301,30 @@ class ConversationEngine:
 
         affection_delta = {"loved": 5, "liked": 2, "neutral": 1, "disliked": -1}[preference]
         trust_delta = 2 if preference in {"loved", "liked"} else 0
+
+        # HH-006 repeated-gift dampening: count how many times this player has
+        # already given this villager the same item_id within the trailing
+        # GIFT_REPEAT_WINDOW_DAYS in-game days. On the threshold-th repeat
+        # (default the 3rd same-item gift in 3 days) and every repeat after,
+        # halve the affection delta toward zero so Dusty-Rose-spam is not
+        # optimal play. Mood, memory writes, and trust deltas are intentionally
+        # left alone — the moment still registers; it just doesn't pay the same.
+        recent_gifts = self._coerce_recent_gifts(
+            current_metadata.get("recent_gifts"), world_day=world_day
+        )
+        repeat_count_in_window = sum(
+            1 for entry in recent_gifts if entry.get("item_id") == item_id
+        ) if item_id else 0
+        repeat_gift_dampened = (
+            bool(item_id) and repeat_count_in_window >= GIFT_REPEAT_DAMPEN_THRESHOLD
+        )
+        if repeat_gift_dampened:
+            # Halve toward zero: +5 → +2, +2 → +1, +1 → 0, -1 → 0. Trust is left
+            # alone (the gift still earned closeness, just not a stat reward).
+            affection_delta = int(affection_delta / 2)
+
+        if item_id:
+            recent_gifts.append({"item_id": item_id, "day": int(world_day)})
         memory_text = f"{player_id} gave {personality.display_name} {item_name}. {personality.display_name} felt {mood} about it."
 
         memory_id = self.memory_store.add_memory(
@@ -284,7 +334,15 @@ class ConversationEngine:
             text=memory_text,
             salience=80 if preference == "loved" else 60,
             emotion=mood,
-            metadata={"item": item, "preference": preference, "context": context},
+            metadata={
+                "item": item,
+                "preference": preference,
+                "context": context,
+                "base_preference": base_preference,
+                "first_of_kind_bonus": first_of_kind_bonus,
+                "repeat_gift_dampened": repeat_gift_dampened,
+                "repeat_count_in_window": repeat_count_in_window,
+            },
         )
         relationship = self.memory_store.update_relationship(
             villager_id,
@@ -292,7 +350,16 @@ class ConversationEngine:
             affection_delta=affection_delta,
             trust_delta=trust_delta,
             familiarity_delta=1,
-            metadata={"last_gift": item_name, "last_gift_preference": preference, "last_memory_id": memory_id},
+            metadata={
+                "last_gift": item_name,
+                "last_gift_preference": preference,
+                "last_gift_base_preference": base_preference,
+                "last_gift_first_of_kind": first_of_kind_bonus,
+                "last_gift_repeat_dampened": repeat_gift_dampened,
+                "last_memory_id": memory_id,
+                "gift_first_done": True,
+                "recent_gifts": recent_gifts,
+            },
         )
 
         event = VillageEvent(
@@ -307,6 +374,9 @@ class ConversationEngine:
                 "mood": mood,
                 "item_id": str(item.get("item_id") or ""),
                 "item_name": item_name,
+                "base_preference": base_preference,
+                "first_of_kind_bonus": first_of_kind_bonus,
+                "repeat_gift_dampened": repeat_gift_dampened,
             },
         )
         self.event_log.publish(event)
@@ -909,6 +979,52 @@ Relevant villager relationships:
         if explicit:
             return explicit
         return set(DEFAULT_LOVED_TAGS)
+
+    @staticmethod
+    def _bump_gift_preference(preference: str) -> str:
+        """Return the next-warmer tier on the gift preference ladder.
+
+        HH-006 first-of-kind bonus: the first gift any player gives a villager
+        should land one tier warmer than its native preference. Loved stays
+        loved (the ladder has no higher rung).
+        """
+        ladder = GIFT_PREFERENCE_LADDER
+        if preference not in ladder:
+            return preference
+        index = ladder.index(preference)
+        return ladder[min(index + 1, len(ladder) - 1)]
+
+    def _coerce_recent_gifts(
+        self,
+        raw_value: Any,
+        *,
+        world_day: int,
+    ) -> list[dict[str, Any]]:
+        """Normalize and prune persisted recent_gifts metadata.
+
+        Returns a list of `{item_id, day}` entries trimmed to those within the
+        trailing `GIFT_REPEAT_WINDOW_DAYS` in-game days relative to the supplied
+        `world_day`. Invalid or malformed rows are dropped silently so a hand
+        edited relationship metadata blob can't crash the gift path.
+        """
+        if not isinstance(raw_value, list):
+            return []
+        window_floor = int(world_day) - GIFT_REPEAT_WINDOW_DAYS + 1
+        cleaned: list[dict[str, Any]] = []
+        for entry in raw_value:
+            if not isinstance(entry, dict):
+                continue
+            entry_item_id = str(entry.get("item_id") or "").strip().lower()
+            if not entry_item_id:
+                continue
+            try:
+                entry_day = int(entry.get("day"))
+            except (TypeError, ValueError):
+                continue
+            if entry_day < window_floor or entry_day > int(world_day):
+                continue
+            cleaned.append({"item_id": entry_item_id, "day": entry_day})
+        return cleaned
 
     def _matches_preference(self, preferences: set[str], item_category: str, item_tags: set[str]) -> bool:
         candidates = {item_category, *item_tags}
